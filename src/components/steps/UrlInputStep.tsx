@@ -35,11 +35,22 @@ export const UrlInputStep = ({ onSubmit, isLoading, setIsLoading }: UrlInputStep
       if (fnError) throw fnError;
 
       if (data.error) {
+        console.error('Erro na extração Shopee:', {
+          url: url.trim(),
+          error: data.error,
+          response: data
+        });
         setError(data.error);
         return;
       }
 
       if (!data.images || data.images.length === 0) {
+        console.error('Nenhuma imagem encontrada:', {
+          url: url.trim(),
+          title: data.title,
+          imagesCount: data.images?.length || 0,
+          fullResponse: data
+        });
         setError('Não foi possível encontrar imagens neste produto. Tente outro link.');
         return;
       }
@@ -47,7 +58,11 @@ export const UrlInputStep = ({ onSubmit, isLoading, setIsLoading }: UrlInputStep
       toast.success(`${data.images.length} imagens encontradas!`);
       onSubmit({ title: data.title, images: data.images });
     } catch (err) {
-      console.error('Error:', err);
+      console.error('Erro ao processar link:', {
+        url: url.trim(),
+        error: err,
+        message: err instanceof Error ? err.message : 'Erro desconhecido'
+      });
       setError('Erro ao processar o link. Verifique se é um link válido da Shopee.');
     } finally {
       setIsLoading(false);
