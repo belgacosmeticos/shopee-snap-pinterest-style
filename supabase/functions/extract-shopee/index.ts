@@ -21,7 +21,6 @@ serve(async (req) => {
       );
     }
 
-    // Check if it's a Shopee URL
     const isShopeeUrl = url.includes('shopee.com') || url.includes('s.shopee');
 
     if (isShopeeUrl) {
@@ -32,7 +31,6 @@ serve(async (req) => {
       );
     }
 
-    // For non-Shopee URLs, use generic extraction
     const result = await extractGeneric(url);
     return new Response(
       JSON.stringify(result),
@@ -48,7 +46,6 @@ serve(async (req) => {
   }
 });
 
-// Generate SHA256 signature for Shopee Affiliate API
 async function generateShopeeSignature(appId: string, timestamp: number, payload: string, secret: string): Promise<string> {
   const signatureString = `${appId}${timestamp}${payload}${secret}`;
   const encoder = new TextEncoder();
@@ -79,10 +76,8 @@ async function extractFromShopee(url: string): Promise<{ title: string; images: 
     const finalUrl = response.url;
     console.log('Final URL after redirects:', finalUrl);
 
-    // Step 2: Extract product name from URL for keyword search
+    // Step 2: Extract product name from URL
     let productName = '';
-    
-    // Extract from URL path - Shopee URLs contain product name before i.SHOP_ID.ITEM_ID
     const urlPath = new URL(finalUrl).pathname;
     const pathMatch = urlPath.match(/\/([^\/]+)-i\.\d+\.\d+/);
     if (pathMatch) {
@@ -112,34 +107,41 @@ async function extractFromShopee(url: string): Promise<{ title: string; images: 
 
     console.log('Extracted IDs - shopId:', shopId, 'itemId:', itemId);
 
-    // Step 4: Try Affiliate API with keyword search (if we have product name)
-    if (appId && appSecret && productName) {
-      console.log('Trying Affiliate API with keyword search...');
-      const affiliateResult = await searchWithAffiliateApi(appId, appSecret, productName.substring(0, 50), null, null);
-      if (affiliateResult.images.length > 0) {
-        return affiliateResult;
-      }
-    }
-
-    // Step 5: Try Affiliate API with shopId filter (works for short links)
-    if (appId && appSecret && shopId && itemId) {
-      console.log('Trying Affiliate API with shopId filter...');
-      const affiliateResult = await searchWithAffiliateApi(appId, appSecret, '', shopId, itemId);
-      if (affiliateResult.images.length > 0) {
-        return affiliateResult;
-      }
-    }
-
-    // Step 6: Try direct Shopee mobile API
+    // PRIORITY 1: Try direct Shopee API first (can get ALL gallery images)
     if (itemId && shopId) {
-      console.log('Trying Shopee mobile API...');
+      console.log('🔍 PRIORITY 1: Trying Shopee internal API for gallery images...');
       const mobileResult = await tryShopeeApi(itemId, shopId, finalUrl);
       if (mobileResult.images.length > 0) {
+        console.log('✅ SUCCESS: Got', mobileResult.images.length, 'gallery images from internal API');
         return mobileResult;
+      }
+      console.log('❌ Internal API failed, trying fallbacks...');
+    }
+
+    // PRIORITY 2: Try Affiliate API with exact product filtering
+    if (appId && appSecret && itemId) {
+      console.log('🔍 PRIORITY 2: Trying Affiliate API with exact product filter...');
+      
+      // First try with shopId to get shop products, then filter by itemId
+      if (shopId) {
+        const affiliateResult = await searchWithAffiliateApi(appId, appSecret, '', shopId, itemId);
+        if (affiliateResult.images.length > 0) {
+          console.log('✅ SUCCESS: Got exact product from Affiliate API');
+          return affiliateResult;
+        }
+      }
+      
+      // Try with keyword if we have product name
+      if (productName) {
+        const affiliateResult = await searchWithAffiliateApi(appId, appSecret, productName.substring(0, 50), null, itemId);
+        if (affiliateResult.images.length > 0) {
+          console.log('✅ SUCCESS: Got product from Affiliate API keyword search');
+          return affiliateResult;
+        }
       }
     }
 
-    // Step 7: If all else fails, return what we have
+    // If all else fails
     return {
       title: productName || 'Produto Shopee',
       images: [],
@@ -162,7 +164,6 @@ async function searchWithAffiliateApi(appId: string, appSecret: string, keyword:
   try {
     const timestamp = Math.floor(Date.now() / 1000);
     
-    // Build query based on available parameters
     let queryParams = '';
     if (keyword) {
       queryParams = `keyword: "${keyword}"`;
@@ -172,7 +173,6 @@ async function searchWithAffiliateApi(appId: string, appSecret: string, keyword:
       queryParams += `shopId: ${shopId}`;
     }
     
-    // Use productOfferV2 with available filters
     const graphqlQuery = {
       query: `query {
         productOfferV2(
@@ -196,8 +196,7 @@ async function searchWithAffiliateApi(appId: string, appSecret: string, keyword:
     const payload = JSON.stringify(graphqlQuery);
     const signature = await generateShopeeSignature(appId, timestamp, payload, appSecret);
 
-    console.log('Calling Shopee Affiliate API with keyword:', keyword);
-    console.log('Payload:', payload);
+    console.log('Calling Shopee Affiliate API...');
 
     const apiResponse = await fetch('https://open-api.affiliate.shopee.com.br/graphql', {
       method: 'POST',
@@ -210,7 +209,6 @@ async function searchWithAffiliateApi(appId: string, appSecret: string, keyword:
 
     console.log('API Response status:', apiResponse.status);
     const responseText = await apiResponse.text();
-    console.log('API Response:', responseText.substring(0, 500));
 
     if (!apiResponse.ok) {
       console.error('Shopee Affiliate API error:', responseText);
@@ -230,22 +228,34 @@ async function searchWithAffiliateApi(appId: string, appSecret: string, keyword:
       return { title: '', images: [], success: false };
     }
 
-    // Get images from all returned products
-    const images: string[] = [];
-    let title = products[0]?.productName || '';
-    
-    for (const product of products) {
-      if (product.imageUrl && !images.includes(product.imageUrl)) {
-        images.push(product.imageUrl);
+    console.log('Found', products.length, 'products from Affiliate API');
+
+    // CRITICAL: Filter to find the EXACT product by itemId
+    if (itemId) {
+      const exactProduct = products.find((p: any) => 
+        p.productLink && p.productLink.includes(itemId)
+      );
+
+      if (exactProduct) {
+        console.log('✅ Found exact product match by itemId:', exactProduct.productName);
+        return {
+          title: exactProduct.productName || '',
+          images: exactProduct.imageUrl ? [exactProduct.imageUrl] : [],
+          success: true
+        };
+      } else {
+        console.log('⚠️ No exact match found for itemId:', itemId);
+        // Return empty if we can't find exact match - don't return wrong products
+        return { title: '', images: [], success: false };
       }
     }
 
-    console.log('Found', images.length, 'images from Affiliate API');
-    
+    // If no itemId filter, return first product (less ideal)
+    const firstProduct = products[0];
     return {
-      title: title,
-      images: images.slice(0, 15),
-      success: images.length > 0
+      title: firstProduct.productName || '',
+      images: firstProduct.imageUrl ? [firstProduct.imageUrl] : [],
+      success: true
     };
 
   } catch (error) {
@@ -254,110 +264,132 @@ async function searchWithAffiliateApi(appId: string, appSecret: string, keyword:
   }
 }
 
-async function tryGenerateShortLink(appId: string, appSecret: string, originalUrl: string): Promise<string | null> {
-  try {
-    const timestamp = Math.floor(Date.now() / 1000);
-    
-    const graphqlQuery = {
-      query: `mutation {
-        generateShortLink(originUrl: "${originalUrl}") {
-          shortLink
-        }
-      }`
-    };
-
-    const payload = JSON.stringify(graphqlQuery);
-    const signature = await generateShopeeSignature(appId, timestamp, payload, appSecret);
-
-    const apiResponse = await fetch('https://open-api.affiliate.shopee.com.br/graphql', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${signature}`,
-      },
-      body: payload,
-    });
-
-    if (!apiResponse.ok) {
-      return null;
-    }
-
-    const apiData = await apiResponse.json();
-    return apiData.data?.generateShortLink?.shortLink || null;
-
-  } catch (error) {
-    console.error('Error generating short link:', error);
-    return null;
-  }
-}
-
 async function tryShopeeApi(itemId: string, shopId: string, referer: string): Promise<{ title: string; images: string[]; success: boolean }> {
-  try {
-    // Try different Shopee API endpoints
-    const endpoints = [
-      `https://shopee.com.br/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`,
-      `https://shopee.com.br/api/v4/pdp/get_pc?item_id=${itemId}&shop_id=${shopId}`,
-    ];
+  // Different User-Agent strategies
+  const userAgents = [
+    // Mobile Safari
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    // Android Chrome
+    'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    // Desktop Chrome
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    // Googlebot (sometimes works)
+    'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+  ];
 
-    for (const apiUrl of endpoints) {
-      console.log('Trying API:', apiUrl);
-      
-      const apiResponse = await fetch(apiUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
-          'Accept': 'application/json',
-          'Accept-Language': 'pt-BR,pt;q=0.9',
-          'Referer': referer,
-          'x-shopee-language': 'pt-BR',
-          'x-api-source': 'rn',
-          'x-sz-sdk-version': '1.10.17',
-          'af-ac-enc-dat': 'null',
-        },
-      });
+  // Multiple endpoint strategies
+  const endpoints = [
+    {
+      url: `https://shopee.com.br/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`,
+      name: 'v4/item/get'
+    },
+    {
+      url: `https://shopee.com.br/api/v4/pdp/get_pc?item_id=${itemId}&shop_id=${shopId}`,
+      name: 'v4/pdp/get_pc'
+    },
+    {
+      url: `https://shopee.com.br/api/v2/item/get?itemid=${itemId}&shopid=${shopId}`,
+      name: 'v2/item/get'
+    },
+  ];
 
-      console.log('API Response status:', apiResponse.status);
-
-      if (apiResponse.ok) {
-        const apiData = await apiResponse.json();
-        console.log('API Response keys:', Object.keys(apiData));
+  for (const ua of userAgents) {
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`Trying ${endpoint.name} with UA: ${ua.substring(0, 30)}...`);
         
+        const apiResponse = await fetch(endpoint.url, {
+          headers: {
+            'User-Agent': ua,
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+            'Referer': referer,
+            'x-shopee-language': 'pt-BR',
+            'x-api-source': 'pc',
+            'x-requested-with': 'XMLHttpRequest',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin',
+          },
+        });
+
+        if (!apiResponse.ok) {
+          console.log(`${endpoint.name} returned status:`, apiResponse.status);
+          continue;
+        }
+
+        const apiData = await apiResponse.json();
+        
+        // Check for error in response
+        if (apiData.error || apiData.error_msg) {
+          console.log(`${endpoint.name} error:`, apiData.error_msg || apiData.error);
+          continue;
+        }
+
         const itemData = apiData.data || apiData.item || apiData;
         
         if (itemData) {
           const title = itemData.name || itemData.title || '';
           const images: string[] = [];
 
+          // Main image
           if (itemData.image) {
-            images.push(`https://cf.shopee.com.br/file/${itemData.image}`);
+            const imgUrl = itemData.image.startsWith('http') 
+              ? itemData.image 
+              : `https://cf.shopee.com.br/file/${itemData.image}`;
+            images.push(imgUrl);
           }
 
+          // Gallery images - THIS IS WHAT WE WANT
           if (itemData.images && Array.isArray(itemData.images)) {
+            console.log('🎉 Found gallery images array with', itemData.images.length, 'images');
             for (const imgId of itemData.images) {
-              const imgUrl = `https://cf.shopee.com.br/file/${imgId}`;
+              const imgUrl = typeof imgId === 'string' && imgId.startsWith('http')
+                ? imgId
+                : `https://cf.shopee.com.br/file/${imgId}`;
               if (!images.includes(imgUrl)) {
                 images.push(imgUrl);
               }
             }
           }
 
+          // Model images (variants/colors)
+          if (itemData.tier_variations && Array.isArray(itemData.tier_variations)) {
+            for (const variation of itemData.tier_variations) {
+              if (variation.images && Array.isArray(variation.images)) {
+                console.log('🎨 Found variation images:', variation.images.length);
+                for (const imgId of variation.images) {
+                  if (imgId) {
+                    const imgUrl = typeof imgId === 'string' && imgId.startsWith('http')
+                      ? imgId
+                      : `https://cf.shopee.com.br/file/${imgId}`;
+                    if (!images.includes(imgUrl)) {
+                      images.push(imgUrl);
+                    }
+                  }
+                }
+              }
+            }
+          }
+
           if (images.length > 0) {
-            console.log('Found', images.length, 'images from Shopee API');
+            console.log(`✅ SUCCESS with ${endpoint.name}: Found ${images.length} total images`);
             return {
               title: title,
-              images: images.slice(0, 15),
+              images: images,
               success: true
             };
           }
         }
+      } catch (error) {
+        console.log(`Error with ${endpoint.name}:`, error);
+        continue;
       }
     }
-
-    return { title: '', images: [], success: false };
-
-  } catch (error) {
-    console.error('Error in Shopee API:', error);
-    return { title: '', images: [], success: false };
   }
+
+  console.log('❌ All Shopee API attempts failed');
+  return { title: '', images: [], success: false };
 }
 
 async function extractGeneric(url: string): Promise<{ title: string; images: string[]; success: boolean; error?: string }> {
@@ -374,12 +406,9 @@ async function extractGeneric(url: string): Promise<{ title: string; images: str
     });
 
     const html = await response.text();
-    console.log('HTML length:', html.length);
-
     const images: string[] = [];
     let title = '';
 
-    // Try to extract from JSON-LD structured data
     const jsonLdMatches = html.matchAll(/<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi);
     for (const match of jsonLdMatches) {
       try {
@@ -405,7 +434,6 @@ async function extractGeneric(url: string): Promise<{ title: string; images: str
       }
     }
 
-    // Extract from og:image meta tags
     const ogImageMatches = html.matchAll(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/gi);
     for (const match of ogImageMatches) {
       if (match[1] && match[1].startsWith('http') && !images.includes(match[1])) {
@@ -413,7 +441,6 @@ async function extractGeneric(url: string): Promise<{ title: string; images: str
       }
     }
 
-    // Also try reverse order
     const ogImageMatches2 = html.matchAll(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/gi);
     for (const match of ogImageMatches2) {
       if (match[1] && match[1].startsWith('http') && !images.includes(match[1])) {
@@ -421,14 +448,12 @@ async function extractGeneric(url: string): Promise<{ title: string; images: str
       }
     }
 
-    // Extract from og:title
     const ogTitleMatch = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i) ||
                          html.match(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i);
     if (ogTitleMatch && !title) {
       title = ogTitleMatch[1];
     }
 
-    // Extract from title tag
     if (!title) {
       const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
       if (titleMatch) {
@@ -436,7 +461,6 @@ async function extractGeneric(url: string): Promise<{ title: string; images: str
       }
     }
 
-    // Extract all image URLs from img tags
     const imgTagMatches = html.matchAll(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi);
     for (const match of imgTagMatches) {
       const imgUrl = match[1];
@@ -445,14 +469,10 @@ async function extractGeneric(url: string): Promise<{ title: string; images: str
       }
     }
 
-    // Clean and filter images
     const uniqueImages = [...new Set(images)]
       .map(img => cleanImageUrl(img))
       .filter(img => img && img.length > 10 && isProductImage(img))
       .slice(0, 15);
-
-    console.log('Extracted title:', title);
-    console.log('Extracted images count:', uniqueImages.length);
 
     return {
       title: title || 'Produto',
@@ -498,7 +518,8 @@ function cleanImageUrl(url: string): string {
       .replace(/\/tn\//g, '/')
       .replace(/_thumb/g, '')
       .replace(/_small/g, '')
-      .replace(/_medium/g, '');
+      .replace(/_medium/g, '')
+      .replace(/\?.*$/, '');
   } catch {
     return url;
   }
