@@ -25,7 +25,7 @@ serve(async (req) => {
     const isShopeeUrl = url.includes('shopee.com') || url.includes('s.shopee');
 
     if (isShopeeUrl) {
-      const result = await extractFromShopeeAffiliate(url);
+      const result = await extractFromShopee(url);
       return new Response(
         JSON.stringify(result),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -59,19 +59,14 @@ async function generateShopeeSignature(appId: string, timestamp: number, payload
   return hashHex;
 }
 
-async function extractFromShopeeAffiliate(url: string): Promise<{ title: string; images: string[]; success: boolean; error?: string }> {
-  console.log('Detected Shopee URL, using Affiliate API...');
+async function extractFromShopee(url: string): Promise<{ title: string; images: string[]; success: boolean; error?: string }> {
+  console.log('Detected Shopee URL, extracting product data...');
 
   const appId = Deno.env.get('SHOPEE_APP_ID');
   const appSecret = Deno.env.get('SHOPEE_APP_SECRET');
 
-  if (!appId || !appSecret) {
-    console.log('Shopee API credentials not configured, falling back to generic extraction');
-    return await extractGeneric(url);
-  }
-
   try {
-    // Step 1: Follow redirects to get final URL and extract IDs
+    // Step 1: Follow redirects to get final URL
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -84,67 +79,115 @@ async function extractFromShopeeAffiliate(url: string): Promise<{ title: string;
     const finalUrl = response.url;
     console.log('Final URL after redirects:', finalUrl);
 
-    // Step 2: Extract item_id from URL
+    // Step 2: Extract product name from URL for keyword search
+    let productName = '';
+    
+    // Extract from URL path - Shopee URLs contain product name before i.SHOP_ID.ITEM_ID
+    const urlPath = new URL(finalUrl).pathname;
+    const pathMatch = urlPath.match(/\/([^\/]+)-i\.\d+\.\d+/);
+    if (pathMatch) {
+      productName = decodeURIComponent(pathMatch[1]).replace(/-/g, ' ');
+      console.log('Extracted product name from URL:', productName);
+    }
+
+    // Step 3: Extract item_id and shop_id from URL
     let itemId: string | null = null;
     let shopId: string | null = null;
 
-    // Pattern 1: i.SHOP_ID.ITEM_ID
     let match = finalUrl.match(/i\.(\d+)\.(\d+)/);
     if (match) {
       shopId = match[1];
       itemId = match[2];
-      console.log('Pattern 1 matched: i.SHOP_ID.ITEM_ID');
+      console.log('Pattern matched: i.SHOP_ID.ITEM_ID');
     }
 
-    // Pattern 2: /lp/SHOP_ID/ITEM_ID
-    if (!itemId) {
-      match = finalUrl.match(/\/lp\/(\d+)\/(\d+)/);
-      if (match) {
-        shopId = match[1];
-        itemId = match[2];
-        console.log('Pattern 2 matched: /lp/SHOP_ID/ITEM_ID');
-      }
-    }
-
-    // Pattern 3: /SELLER/SHOP_ID/ITEM_ID
     if (!itemId) {
       match = finalUrl.match(/\/[a-zA-Z]+\/(\d+)\/(\d+)/);
       if (match) {
         shopId = match[1];
         itemId = match[2];
-        console.log('Pattern 3 matched: /SELLER/SHOP_ID/ITEM_ID');
+        console.log('Pattern matched: /SELLER/SHOP_ID/ITEM_ID');
       }
     }
 
     console.log('Extracted IDs - shopId:', shopId, 'itemId:', itemId);
 
-    if (!itemId) {
-      console.log('Could not extract item ID from URL, falling back to generic extraction');
-      return await extractGeneric(url);
+    // Step 4: Try Affiliate API with keyword search (if we have product name)
+    if (appId && appSecret && productName) {
+      console.log('Trying Affiliate API with keyword search...');
+      const affiliateResult = await searchWithAffiliateApi(appId, appSecret, productName.substring(0, 50), null, null);
+      if (affiliateResult.images.length > 0) {
+        return affiliateResult;
+      }
     }
 
-    // Step 3: Use Shopee Affiliate API to get product details
+    // Step 5: Try Affiliate API with shopId filter (works for short links)
+    if (appId && appSecret && shopId && itemId) {
+      console.log('Trying Affiliate API with shopId filter...');
+      const affiliateResult = await searchWithAffiliateApi(appId, appSecret, '', shopId, itemId);
+      if (affiliateResult.images.length > 0) {
+        return affiliateResult;
+      }
+    }
+
+    // Step 6: Try direct Shopee mobile API
+    if (itemId && shopId) {
+      console.log('Trying Shopee mobile API...');
+      const mobileResult = await tryShopeeApi(itemId, shopId, finalUrl);
+      if (mobileResult.images.length > 0) {
+        return mobileResult;
+      }
+    }
+
+    // Step 7: If all else fails, return what we have
+    return {
+      title: productName || 'Produto Shopee',
+      images: [],
+      success: false,
+      error: 'Não foi possível extrair imagens deste produto. A Shopee bloqueia requisições automáticas.'
+    };
+
+  } catch (error) {
+    console.error('Error in Shopee extraction:', error);
+    return {
+      title: 'Produto Shopee',
+      images: [],
+      success: false,
+      error: 'Erro ao extrair dados do produto.'
+    };
+  }
+}
+
+async function searchWithAffiliateApi(appId: string, appSecret: string, keyword: string, shopId: string | null, itemId: string | null): Promise<{ title: string; images: string[]; success: boolean }> {
+  try {
     const timestamp = Math.floor(Date.now() / 1000);
     
-    // GraphQL query to get product offer by shopId and itemId
+    // Build query based on available parameters
+    let queryParams = '';
+    if (keyword) {
+      queryParams = `keyword: "${keyword}"`;
+    }
+    if (shopId) {
+      queryParams += queryParams ? ', ' : '';
+      queryParams += `shopId: ${shopId}`;
+    }
+    
+    // Use productOfferV2 with available filters
     const graphqlQuery = {
       query: `query {
-        productOffer(
-          shopId: "${shopId}"
-          itemId: "${itemId}"
-          limit: 10
+        productOfferV2(
+          ${queryParams}
+          listType: 0
+          sortType: 1
+          page: 0
+          limit: 50
         ) {
           nodes {
             productName
             imageUrl
             price
             commissionRate
-            shopName
-          }
-          pageInfo {
-            page
-            limit
-            hasNextPage
+            productLink
           }
         }
       }`
@@ -153,9 +196,7 @@ async function extractFromShopeeAffiliate(url: string): Promise<{ title: string;
     const payload = JSON.stringify(graphqlQuery);
     const signature = await generateShopeeSignature(appId, timestamp, payload, appSecret);
 
-    console.log('Calling Shopee Affiliate API...');
-    console.log('AppId:', appId);
-    console.log('Timestamp:', timestamp);
+    console.log('Calling Shopee Affiliate API with keyword:', keyword);
     console.log('Payload:', payload);
 
     const apiResponse = await fetch('https://open-api.affiliate.shopee.com.br/graphql', {
@@ -169,161 +210,153 @@ async function extractFromShopeeAffiliate(url: string): Promise<{ title: string;
 
     console.log('API Response status:', apiResponse.status);
     const responseText = await apiResponse.text();
-    console.log('API Response text:', responseText);
+    console.log('API Response:', responseText.substring(0, 500));
 
     if (!apiResponse.ok) {
       console.error('Shopee Affiliate API error:', responseText);
-      return await extractFromShopeeInternal(finalUrl, shopId, itemId);
+      return { title: '', images: [], success: false };
     }
 
     const apiData = JSON.parse(responseText);
-    console.log('API Response data:', JSON.stringify(apiData, null, 2));
-
+    
     if (apiData.errors && apiData.errors.length > 0) {
       console.error('GraphQL errors:', apiData.errors);
-      return await extractFromShopeeInternal(finalUrl, shopId, itemId);
+      return { title: '', images: [], success: false };
     }
 
-    const products = apiData.data?.productOffer?.nodes;
+    const products = apiData.data?.productOfferV2?.nodes;
     if (!products || products.length === 0) {
-      console.log('No products found in API response, trying internal API');
-      return await extractFromShopeeInternal(finalUrl, shopId, itemId);
+      console.log('No products found in API response');
+      return { title: '', images: [], success: false };
     }
 
-    // Collect images from all product variants/nodes
+    // Get images from all returned products
     const images: string[] = [];
-    let title = '';
+    let title = products[0]?.productName || '';
     
     for (const product of products) {
       if (product.imageUrl && !images.includes(product.imageUrl)) {
         images.push(product.imageUrl);
       }
-      if (!title && product.productName) {
-        title = product.productName;
-      }
     }
 
-    console.log('Extracted from Affiliate API - title:', title, 'images:', images.length);
-
-    // If we got images from affiliate API, try to supplement with internal API
-    if (images.length <= 1 && shopId) {
-      console.log('Only', images.length, 'image(s) from Affiliate API, fetching more from internal API...');
-      const internalResult = await extractFromShopeeInternal(finalUrl, shopId, itemId);
-      if (internalResult.images.length > images.length) {
-        return {
-          title: title || internalResult.title,
-          images: internalResult.images,
-          success: true
-        };
-      }
-    }
-
-    if (images.length === 0) {
-      console.log('No images from Affiliate API, trying internal API');
-      return await extractFromShopeeInternal(finalUrl, shopId, itemId);
-    }
-
+    console.log('Found', images.length, 'images from Affiliate API');
+    
     return {
-      title: title || 'Produto Shopee',
-      images: images,
-      success: true
+      title: title,
+      images: images.slice(0, 15),
+      success: images.length > 0
     };
 
   } catch (error) {
-    console.error('Error in Shopee Affiliate extraction:', error);
-    return await extractGeneric(url);
+    console.error('Error in Affiliate API search:', error);
+    return { title: '', images: [], success: false };
   }
 }
 
-async function extractFromShopeeInternal(finalUrl: string, shopId: string | null, itemId: string | null): Promise<{ title: string; images: string[]; success: boolean; error?: string }> {
-  console.log('Using Shopee internal API extraction...');
-
-  if (!shopId || !itemId) {
-    return await extractGeneric(finalUrl);
-  }
-
+async function tryGenerateShortLink(appId: string, appSecret: string, originalUrl: string): Promise<string | null> {
   try {
-    const apiUrl = `https://shopee.com.br/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`;
-    console.log('Calling Shopee internal API:', apiUrl);
+    const timestamp = Math.floor(Date.now() / 1000);
+    
+    const graphqlQuery = {
+      query: `mutation {
+        generateShortLink(originUrl: "${originalUrl}") {
+          shortLink
+        }
+      }`
+    };
 
-    const apiResponse = await fetch(apiUrl, {
+    const payload = JSON.stringify(graphqlQuery);
+    const signature = await generateShopeeSignature(appId, timestamp, payload, appSecret);
+
+    const apiResponse = await fetch('https://open-api.affiliate.shopee.com.br/graphql', {
+      method: 'POST',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Referer': finalUrl,
-        'x-shopee-language': 'pt-BR',
-        'x-api-source': 'pc',
-        'x-requested-with': 'XMLHttpRequest',
+        'Content-Type': 'application/json',
+        'Authorization': `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${signature}`,
       },
+      body: payload,
     });
 
-    console.log('Internal API Response status:', apiResponse.status);
-
     if (!apiResponse.ok) {
-      console.log('Internal API request failed, falling back to generic extraction');
-      return await extractGeneric(finalUrl);
+      return null;
     }
 
     const apiData = await apiResponse.json();
-    console.log('Internal API Response data keys:', Object.keys(apiData));
+    return apiData.data?.generateShortLink?.shortLink || null;
 
-    const itemData = apiData.data || apiData.item || apiData;
-    
-    if (!itemData) {
-      console.log('No item data in internal API response, falling back to generic extraction');
-      return await extractGeneric(finalUrl);
-    }
+  } catch (error) {
+    console.error('Error generating short link:', error);
+    return null;
+  }
+}
 
-    const title = itemData.name || itemData.title || 'Produto Shopee';
-    console.log('Extracted title from internal API:', title);
+async function tryShopeeApi(itemId: string, shopId: string, referer: string): Promise<{ title: string; images: string[]; success: boolean }> {
+  try {
+    // Try different Shopee API endpoints
+    const endpoints = [
+      `https://shopee.com.br/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`,
+      `https://shopee.com.br/api/v4/pdp/get_pc?item_id=${itemId}&shop_id=${shopId}`,
+    ];
 
-    const images: string[] = [];
+    for (const apiUrl of endpoints) {
+      console.log('Trying API:', apiUrl);
+      
+      const apiResponse = await fetch(apiUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+          'Accept': 'application/json',
+          'Accept-Language': 'pt-BR,pt;q=0.9',
+          'Referer': referer,
+          'x-shopee-language': 'pt-BR',
+          'x-api-source': 'rn',
+          'x-sz-sdk-version': '1.10.17',
+          'af-ac-enc-dat': 'null',
+        },
+      });
 
-    if (itemData.image) {
-      images.push(`https://cf.shopee.com.br/file/${itemData.image}`);
-    }
+      console.log('API Response status:', apiResponse.status);
 
-    if (itemData.images && Array.isArray(itemData.images)) {
-      for (const imgId of itemData.images) {
-        const imgUrl = `https://cf.shopee.com.br/file/${imgId}`;
-        if (!images.includes(imgUrl)) {
-          images.push(imgUrl);
-        }
-      }
-    }
+      if (apiResponse.ok) {
+        const apiData = await apiResponse.json();
+        console.log('API Response keys:', Object.keys(apiData));
+        
+        const itemData = apiData.data || apiData.item || apiData;
+        
+        if (itemData) {
+          const title = itemData.name || itemData.title || '';
+          const images: string[] = [];
 
-    if (itemData.tier_variations) {
-      for (const variation of itemData.tier_variations) {
-        if (variation.images) {
-          for (const imgId of variation.images) {
-            if (imgId) {
+          if (itemData.image) {
+            images.push(`https://cf.shopee.com.br/file/${itemData.image}`);
+          }
+
+          if (itemData.images && Array.isArray(itemData.images)) {
+            for (const imgId of itemData.images) {
               const imgUrl = `https://cf.shopee.com.br/file/${imgId}`;
               if (!images.includes(imgUrl)) {
                 images.push(imgUrl);
               }
             }
           }
+
+          if (images.length > 0) {
+            console.log('Found', images.length, 'images from Shopee API');
+            return {
+              title: title,
+              images: images.slice(0, 15),
+              success: true
+            };
+          }
         }
       }
     }
 
-    console.log('Extracted images count from internal API:', images.length);
-
-    if (images.length === 0) {
-      console.log('No images found in internal API response, falling back to generic extraction');
-      return await extractGeneric(finalUrl);
-    }
-
-    return {
-      title,
-      images: images.slice(0, 15),
-      success: true
-    };
+    return { title: '', images: [], success: false };
 
   } catch (error) {
-    console.error('Error in Shopee internal extraction:', error);
-    return await extractGeneric(finalUrl);
+    console.error('Error in Shopee API:', error);
+    return { title: '', images: [], success: false };
   }
 }
 
@@ -412,27 +445,6 @@ async function extractGeneric(url: string): Promise<{ title: string; images: str
       }
     }
 
-    // Extract from data-src attributes
-    const dataSrcMatches = html.matchAll(/data-src=["']([^"']+)["']/gi);
-    for (const match of dataSrcMatches) {
-      const imgUrl = match[1];
-      if (imgUrl && imgUrl.startsWith('http') && isProductImage(imgUrl) && !images.includes(imgUrl)) {
-        images.push(imgUrl);
-      }
-    }
-
-    // Extract images from srcset
-    const srcsetMatches = html.matchAll(/srcset=["']([^"']+)["']/gi);
-    for (const match of srcsetMatches) {
-      const srcset = match[1];
-      const urls = srcset.split(',').map(s => s.trim().split(' ')[0]);
-      for (const imgUrl of urls) {
-        if (imgUrl && imgUrl.startsWith('http') && isProductImage(imgUrl) && !images.includes(imgUrl)) {
-          images.push(imgUrl);
-        }
-      }
-    }
-
     // Clean and filter images
     const uniqueImages = [...new Set(images)]
       .map(img => cleanImageUrl(img))
@@ -467,8 +479,7 @@ function isProductImage(url: string): boolean {
     'analytics', 'facebook', 'twitter', 'instagram', 'social', 'badge',
     'button', 'arrow', 'loading', 'spinner', 'placeholder', 'blank',
     '1x1', 'spacer', 'transparent', 'advertisement', 'ad-', 'ads-',
-    'favicon', 'emoji', 'svg', 'splash_screen', 'splash-screen',
-    'ios_splash', 'android_splash', 'app_icon'
+    'favicon', 'emoji', 'svg', 'splash_screen', 'splash-screen'
   ];
   
   for (const pattern of excludePatterns) {
