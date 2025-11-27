@@ -1,13 +1,15 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { PinGenTool } from '@/components/PinGenTool';
+import { Helmet } from 'react-helmet-async';
 
 const Index = () => {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">Welcome to Your Blank App</h1>
-        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
-      </div>
-    </div>
+    <>
+      <Helmet>
+        <title>PinGen - Gerador de Pins Virais para Pinterest | Afiliados Shopee</title>
+        <meta name="description" content="Transforme produtos da Shopee em imagens virais para o Pinterest. Ferramenta de geração de conteúdo para afiliados." />
+      </Helmet>
+      <PinGenTool />
+    </>
   );
 };
 
