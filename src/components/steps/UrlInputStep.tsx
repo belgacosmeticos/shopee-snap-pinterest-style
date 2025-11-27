@@ -21,12 +21,7 @@ export const UrlInputStep = ({ onSubmit, isLoading, setIsLoading }: UrlInputStep
     setError('');
 
     if (!url.trim()) {
-      setError('Por favor, insira um link da Shopee');
-      return;
-    }
-
-    if (!url.includes('shopee')) {
-      setError('O link deve ser da Shopee');
+      setError('Por favor, insira um link do produto');
       return;
     }
 
@@ -67,7 +62,7 @@ export const UrlInputStep = ({ onSubmit, isLoading, setIsLoading }: UrlInputStep
         </div>
         <h2 className="text-2xl font-display font-semibold mb-2">Cole o link do produto</h2>
         <p className="text-muted-foreground">
-          Insira o link de qualquer produto da Shopee para extrair as imagens
+          Insira o link de qualquer produto para extrair as imagens
         </p>
       </div>
 
@@ -75,7 +70,7 @@ export const UrlInputStep = ({ onSubmit, isLoading, setIsLoading }: UrlInputStep
         <div className="relative">
           <Input
             type="url"
-            placeholder="https://shopee.com.br/produto..."
+            placeholder="https://exemplo.com/produto..."
             value={url}
             onChange={(e) => {
               setUrl(e.target.value);
@@ -116,7 +111,7 @@ export const UrlInputStep = ({ onSubmit, isLoading, setIsLoading }: UrlInputStep
 
       <div className="mt-6 pt-6 border-t border-border">
         <p className="text-sm text-muted-foreground text-center">
-          💡 Dica: Use o link completo do produto, não o link encurtado
+          💡 Dica: Use o link completo do produto para melhores resultados
         </p>
       </div>
     </Card>
