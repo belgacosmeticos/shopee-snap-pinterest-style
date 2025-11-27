@@ -126,25 +126,25 @@ async function extractFromShopeeAffiliate(url: string): Promise<{ title: string;
     // Step 3: Use Shopee Affiliate API to get product details
     const timestamp = Math.floor(Date.now() / 1000);
     
-    // GraphQL query to get product offer by item IDs
+    // GraphQL query to get product offer by shopId and itemId
     const graphqlQuery = {
       query: `query {
         productOffer(
-          itemIds: [${itemId}]
-          limit: 1
+          shopId: "${shopId}"
+          itemId: "${itemId}"
+          limit: 10
         ) {
           nodes {
             productName
             imageUrl
-            offerLink
-            originalLink
             price
-            priceMin
-            priceMax
             commissionRate
             shopName
-            shopId
-            itemId
+          }
+          pageInfo {
+            page
+            limit
+            hasNextPage
           }
         }
       }`
@@ -190,30 +190,41 @@ async function extractFromShopeeAffiliate(url: string): Promise<{ title: string;
       return await extractFromShopeeInternal(finalUrl, shopId, itemId);
     }
 
-    const product = products[0];
+    // Collect images from all product variants/nodes
     const images: string[] = [];
+    let title = '';
     
-    if (product.imageUrl) {
-      images.push(product.imageUrl);
+    for (const product of products) {
+      if (product.imageUrl && !images.includes(product.imageUrl)) {
+        images.push(product.imageUrl);
+      }
+      if (!title && product.productName) {
+        title = product.productName;
+      }
     }
 
-    console.log('Extracted from Affiliate API - title:', product.productName, 'images:', images.length);
+    console.log('Extracted from Affiliate API - title:', title, 'images:', images.length);
 
-    // If we only got 1 image from affiliate API, try to get more from internal API
+    // If we got images from affiliate API, try to supplement with internal API
     if (images.length <= 1 && shopId) {
-      console.log('Only 1 image from Affiliate API, fetching more from internal API...');
+      console.log('Only', images.length, 'image(s) from Affiliate API, fetching more from internal API...');
       const internalResult = await extractFromShopeeInternal(finalUrl, shopId, itemId);
       if (internalResult.images.length > images.length) {
         return {
-          title: product.productName || internalResult.title,
+          title: title || internalResult.title,
           images: internalResult.images,
           success: true
         };
       }
     }
 
+    if (images.length === 0) {
+      console.log('No images from Affiliate API, trying internal API');
+      return await extractFromShopeeInternal(finalUrl, shopId, itemId);
+    }
+
     return {
-      title: product.productName || 'Produto Shopee',
+      title: title || 'Produto Shopee',
       images: images,
       success: true
     };
