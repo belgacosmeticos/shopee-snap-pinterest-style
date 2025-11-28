@@ -87,12 +87,25 @@ serve(async (req) => {
     }
 
     const data = await response.json();
-    console.log('AI Response received');
+    console.log('AI Response structure:', JSON.stringify(data, null, 2));
 
-    const generatedImage = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    // Try multiple paths to find the generated image
+    let generatedImage = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    
+    // Alternative path: check if image is directly in the message
+    if (!generatedImage) {
+      generatedImage = data.choices?.[0]?.message?.images?.[0]?.url;
+    }
+    
+    // Another alternative: check for inline_data format
+    if (!generatedImage && data.choices?.[0]?.message?.images?.[0]?.inline_data) {
+      const inlineData = data.choices[0].message.images[0].inline_data;
+      generatedImage = `data:${inlineData.mime_type};base64,${inlineData.data}`;
+    }
     
     if (!generatedImage) {
-      throw new Error('No image generated');
+      console.error('No image found in response. Full response:', JSON.stringify(data));
+      throw new Error('No image generated - check logs for response structure');
     }
 
     return new Response(
