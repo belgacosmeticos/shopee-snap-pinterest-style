@@ -1,16 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { ArrowLeft, Sparkles, Shuffle, Camera, Sun, Building, Leaf, ShoppingBag, Waves, Home, TreeDeciduous } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import type { ProductData, GeneratedResult } from '../PinGenTool';
+import type { ProductData, GeneratedResult, GenerationSettings, GeneratedImage } from '../PinGenTool';
 
 interface GenerateStepProps {
   productData: ProductData;
-  onGenerate: (result: GeneratedResult) => void;
+  onGenerate: (result: GeneratedResult, settings: GenerationSettings) => void;
   onBack: () => void;
+  initialSettings?: GenerationSettings | null;
 }
 
 const SCENES = [
@@ -24,51 +25,86 @@ const SCENES = [
   { icon: TreeDeciduous, label: 'Outono Fashion', description: 'Parque com folhas de outono' },
 ];
 
-export const GenerateStep = ({ productData, onGenerate, onBack }: GenerateStepProps) => {
-  const [selectedScene, setSelectedScene] = useState<number | null>(null);
-  const [customPrompt, setCustomPrompt] = useState('');
+const QUANTITY_OPTIONS = [1, 2, 3, 5];
+
+export const GenerateStep = ({ productData, onGenerate, onBack, initialSettings }: GenerateStepProps) => {
+  const [selectedScene, setSelectedScene] = useState<number | null>(initialSettings?.sceneIndex ?? null);
+  const [customPrompt, setCustomPrompt] = useState(initialSettings?.customPrompt ?? '');
+  const [quantity, setQuantity] = useState(initialSettings?.quantity ?? 1);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generatingCount, setGeneratingCount] = useState(0);
+
+  const generateSingleImage = async (): Promise<GeneratedImage> => {
+    const { data: imageData, error: imageError } = await supabase.functions.invoke('generate-pinterest-image', {
+      body: {
+        imageUrl: productData.selectedImage,
+        productTitle: productData.title,
+        customPrompt: customPrompt || undefined,
+        sceneIndex: selectedScene ?? undefined,
+      }
+    });
+
+    if (imageError) throw imageError;
+    if (imageData.error) throw new Error(imageData.error);
+
+    return {
+      image: imageData.image,
+      sceneUsed: imageData.sceneUsed,
+    };
+  };
 
   const handleGenerate = async () => {
     setIsGenerating(true);
+    setGeneratingCount(0);
 
     try {
-      // Generate the image
-      const { data: imageData, error: imageError } = await supabase.functions.invoke('generate-pinterest-image', {
-        body: {
-          imageUrl: productData.selectedImage,
-          productTitle: productData.title,
-          customPrompt: customPrompt || undefined,
-          sceneIndex: selectedScene ?? undefined,
-        }
-      });
+      // Generate images in parallel (but with some staggering to avoid rate limits)
+      const imagePromises: Promise<GeneratedImage>[] = [];
+      
+      for (let i = 0; i < quantity; i++) {
+        const promise = (async () => {
+          // Small delay between requests to avoid rate limiting
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, i * 500));
+          }
+          const result = await generateSingleImage();
+          setGeneratingCount(prev => prev + 1);
+          return result;
+        })();
+        imagePromises.push(promise);
+      }
 
-      if (imageError) throw imageError;
-      if (imageData.error) throw new Error(imageData.error);
+      const images = await Promise.all(imagePromises);
 
-      // Generate the caption
+      // Generate the caption based on first image's scene
       const { data: captionData, error: captionError } = await supabase.functions.invoke('generate-pinterest-caption', {
         body: {
           productTitle: productData.title,
-          sceneDescription: imageData.sceneUsed,
+          sceneDescription: images[0].sceneUsed,
         }
       });
 
       if (captionError) throw captionError;
 
-      toast.success('Imagem gerada com sucesso!');
+      toast.success(`${images.length} ${images.length === 1 ? 'imagem gerada' : 'imagens geradas'} com sucesso!`);
       
+      const settings: GenerationSettings = {
+        sceneIndex: selectedScene,
+        customPrompt,
+        quantity,
+      };
+
       onGenerate({
-        image: imageData.image,
+        images,
         title: captionData?.title || `✨ ${productData.title.slice(0, 80)}`,
         description: captionData?.description || `Look inspirador! #moda #fashion #style`,
-        sceneUsed: imageData.sceneUsed,
-      });
+      }, settings);
     } catch (err: any) {
       console.error('Error:', err);
       toast.error(err.message || 'Erro ao gerar imagem. Tente novamente.');
     } finally {
       setIsGenerating(false);
+      setGeneratingCount(0);
     }
   };
 
@@ -79,26 +115,46 @@ export const GenerateStep = ({ productData, onGenerate, onBack }: GenerateStepPr
   };
 
   return (
-    <Card className="p-8 shadow-card gradient-card">
-      <div className="flex items-center gap-4 mb-6">
+    <Card className="p-6 md:p-8 shadow-card gradient-card">
+      <div className="flex items-center gap-3 md:gap-4 mb-6">
         <Button variant="ghost" size="icon" onClick={onBack}>
           <ArrowLeft className="w-5 h-5" />
         </Button>
         <div>
-          <h2 className="text-2xl font-display font-semibold">Personalize a geração</h2>
-          <p className="text-muted-foreground text-sm">Escolha o cenário ou deixe aleatório</p>
+          <h2 className="text-xl md:text-2xl font-display font-semibold">Personalize a geração</h2>
+          <p className="text-muted-foreground text-sm">Escolha o cenário e quantidade</p>
         </div>
       </div>
 
       {/* Preview da imagem selecionada */}
       <div className="mb-6">
         <p className="text-sm font-medium mb-2">Imagem de referência:</p>
-        <div className="w-32 h-32 rounded-xl overflow-hidden border-2 border-coral shadow-soft">
+        <div className="w-24 h-24 md:w-32 md:h-32 rounded-xl overflow-hidden border-2 border-coral shadow-soft">
           <img
             src={productData.selectedImage}
             alt="Referência"
             className="w-full h-full object-cover"
           />
+        </div>
+      </div>
+
+      {/* Quantity Selection */}
+      <div className="mb-6">
+        <p className="text-sm font-medium mb-3">Quantas imagens gerar:</p>
+        <div className="flex gap-2 flex-wrap">
+          {QUANTITY_OPTIONS.map((q) => (
+            <button
+              key={q}
+              onClick={() => setQuantity(q)}
+              className={`px-4 py-2 rounded-xl border-2 transition-all font-medium ${
+                quantity === q
+                  ? 'border-coral bg-coral/10 text-coral'
+                  : 'border-border hover:border-coral/50'
+              }`}
+            >
+              {q} {q === 1 ? 'imagem' : 'imagens'}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -111,22 +167,22 @@ export const GenerateStep = ({ productData, onGenerate, onBack }: GenerateStepPr
             Aleatório
           </Button>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
           {SCENES.map((scene, index) => {
             const Icon = scene.icon;
             return (
               <button
                 key={index}
                 onClick={() => setSelectedScene(index)}
-                className={`p-3 rounded-xl border-2 transition-all text-left hover:scale-[1.02] ${
+                className={`p-2 md:p-3 rounded-xl border-2 transition-all text-left hover:scale-[1.02] ${
                   selectedScene === index
                     ? 'border-coral bg-coral/10'
                     : 'border-border hover:border-coral/50'
                 }`}
               >
-                <Icon className={`w-5 h-5 mb-2 ${selectedScene === index ? 'text-coral' : 'text-muted-foreground'}`} />
-                <p className="text-sm font-medium line-clamp-1">{scene.label}</p>
-                <p className="text-xs text-muted-foreground line-clamp-1">{scene.description}</p>
+                <Icon className={`w-4 h-4 md:w-5 md:h-5 mb-1 md:mb-2 ${selectedScene === index ? 'text-coral' : 'text-muted-foreground'}`} />
+                <p className="text-xs md:text-sm font-medium line-clamp-1">{scene.label}</p>
+                <p className="text-xs text-muted-foreground line-clamp-1 hidden md:block">{scene.description}</p>
               </button>
             );
           })}
@@ -157,19 +213,19 @@ export const GenerateStep = ({ productData, onGenerate, onBack }: GenerateStepPr
         {isGenerating ? (
           <>
             <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-            Gerando imagem viral...
+            Gerando {generatingCount}/{quantity}...
           </>
         ) : (
           <>
             <Sparkles className="w-5 h-5" />
-            Gerar Imagem para Pinterest
+            Gerar {quantity} {quantity === 1 ? 'Imagem' : 'Imagens'}
           </>
         )}
       </Button>
 
       {isGenerating && (
         <p className="text-center text-sm text-muted-foreground mt-4 animate-pulse">
-          ✨ Criando sua foto estilo Pinterest... Isso pode levar alguns segundos.
+          ✨ Criando suas fotos estilo Pinterest... Isso pode levar alguns segundos.
         </p>
       )}
     </Card>
