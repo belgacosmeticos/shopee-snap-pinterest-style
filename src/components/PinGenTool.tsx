@@ -12,17 +12,28 @@ export interface ProductData {
   selectedImage: string;
 }
 
-export interface GeneratedResult {
+export interface GeneratedImage {
   image: string;
+  sceneUsed: string;
+}
+
+export interface GeneratedResult {
+  images: GeneratedImage[];
   title: string;
   description: string;
-  sceneUsed: string;
+}
+
+export interface GenerationSettings {
+  sceneIndex: number | null;
+  customPrompt: string;
+  quantity: number;
 }
 
 export const PinGenTool = () => {
   const [currentStep, setCurrentStep] = useState<Step>('input');
   const [productData, setProductData] = useState<ProductData | null>(null);
   const [generatedResult, setGeneratedResult] = useState<GeneratedResult | null>(null);
+  const [generationSettings, setGenerationSettings] = useState<GenerationSettings | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleUrlSubmit = (data: { title: string; images: string[] }) => {
@@ -37,8 +48,9 @@ export const PinGenTool = () => {
     }
   };
 
-  const handleGenerate = (result: GeneratedResult) => {
+  const handleGenerate = (result: GeneratedResult, settings: GenerationSettings) => {
     setGeneratedResult(result);
+    setGenerationSettings(settings);
     setCurrentStep('result');
   };
 
@@ -50,6 +62,7 @@ export const PinGenTool = () => {
   const handleReset = () => {
     setProductData(null);
     setGeneratedResult(null);
+    setGenerationSettings(null);
     setCurrentStep('input');
   };
 
@@ -104,15 +117,18 @@ export const PinGenTool = () => {
               productData={productData}
               onGenerate={handleGenerate}
               onBack={handleBackToSelect}
+              initialSettings={generationSettings}
             />
           )}
           
-          {currentStep === 'result' && generatedResult && productData && (
+          {currentStep === 'result' && generatedResult && productData && generationSettings && (
             <ResultStep
               result={generatedResult}
-              productTitle={productData.title}
+              productData={productData}
+              settings={generationSettings}
               onRegenerate={handleRegenerate}
               onReset={handleReset}
+              onUpdateResult={setGeneratedResult}
             />
           )}
         </main>

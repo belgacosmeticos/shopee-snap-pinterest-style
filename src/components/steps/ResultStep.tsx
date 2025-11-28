@@ -3,22 +3,37 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
-import { Copy, RefreshCw, Home, Check, ExternalLink, MessageSquare } from 'lucide-react';
+import { Copy, RefreshCw, Home, Check, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
-import type { GeneratedResult } from '../PinGenTool';
+import { supabase } from '@/integrations/supabase/client';
+import type { GeneratedResult, ProductData, GenerationSettings, GeneratedImage } from '../PinGenTool';
+
+// Pinterest SVG icon
+const PinterestIcon = () => (
+  <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current">
+    <path d="M12 0C5.373 0 0 5.373 0 12c0 5.084 3.163 9.426 7.627 11.174-.105-.949-.2-2.405.042-3.441.218-.937 1.407-5.965 1.407-5.965s-.359-.719-.359-1.782c0-1.668.967-2.914 2.171-2.914 1.023 0 1.518.769 1.518 1.69 0 1.029-.655 2.568-.994 3.995-.283 1.194.599 2.169 1.777 2.169 2.133 0 3.772-2.249 3.772-5.495 0-2.873-2.064-4.882-5.012-4.882-3.414 0-5.418 2.561-5.418 5.207 0 1.031.397 2.138.893 2.738.098.119.112.224.083.345l-.333 1.36c-.053.22-.174.267-.402.161-1.499-.698-2.436-2.889-2.436-4.649 0-3.785 2.75-7.262 7.929-7.262 4.163 0 7.398 2.967 7.398 6.931 0 4.136-2.607 7.464-6.227 7.464-1.216 0-2.359-.632-2.75-1.378l-.748 2.853c-.271 1.043-1.002 2.35-1.492 3.146C9.57 23.812 10.763 24 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0z"/>
+  </svg>
+);
 
 interface ResultStepProps {
   result: GeneratedResult;
-  productTitle: string;
+  productData: ProductData;
+  settings: GenerationSettings;
   onRegenerate: () => void;
   onReset: () => void;
+  onUpdateResult: (result: GeneratedResult) => void;
 }
 
-export const ResultStep = ({ result, productTitle, onRegenerate, onReset }: ResultStepProps) => {
+export const ResultStep = ({ result, productData, settings, onRegenerate, onReset, onUpdateResult }: ResultStepProps) => {
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copiedTitle, setCopiedTitle] = useState(false);
   const [copiedDesc, setCopiedDesc] = useState(false);
-  const [feedback, setFeedback] = useState('');
-  const [showFeedback, setShowFeedback] = useState(false);
+  const [isRegeneratingImage, setIsRegeneratingImage] = useState(false);
+  const [isRegeneratingTitle, setIsRegeneratingTitle] = useState(false);
+  const [isRegeneratingDesc, setIsRegeneratingDesc] = useState(false);
+
+  const currentImage = result.images[currentImageIndex];
+  const hasMultipleImages = result.images.length > 1;
 
   const handleCopy = async (text: string, type: 'title' | 'desc') => {
     await navigator.clipboard.writeText(text);
@@ -33,59 +48,219 @@ export const ResultStep = ({ result, productTitle, onRegenerate, onReset }: Resu
   };
 
   const handleSharePinterest = () => {
-    // Pinterest create pin URL
-    const pinterestUrl = `https://www.pinterest.com/pin-builder/?description=${encodeURIComponent(result.description)}&media=${encodeURIComponent(result.image)}&method=button`;
+    // For base64 images, we need to use a different approach
+    // Pinterest pin-builder works best with publicly accessible URLs
+    // For base64, we'll open Pinterest with the description and let user upload
+    const pinterestUrl = `https://www.pinterest.com/pin-builder/?description=${encodeURIComponent(result.description)}`;
     window.open(pinterestUrl, '_blank');
+    toast.info('Baixe a imagem e faça upload no Pinterest');
   };
 
-  const handleDownload = async () => {
+  const handleDownload = async (imageUrl: string, index?: number) => {
     try {
-      const response = await fetch(result.image);
+      const response = await fetch(imageUrl);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `pinterest-${Date.now()}.png`;
+      a.download = `pinterest-${Date.now()}${index !== undefined ? `-${index + 1}` : ''}.png`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       toast.success('Imagem baixada!');
     } catch (err) {
-      // Fallback: open in new tab
-      window.open(result.image, '_blank');
+      window.open(imageUrl, '_blank');
     }
   };
 
+  const handleRegenerateCurrentImage = async () => {
+    setIsRegeneratingImage(true);
+    try {
+      const { data: imageData, error: imageError } = await supabase.functions.invoke('generate-pinterest-image', {
+        body: {
+          imageUrl: productData.selectedImage,
+          productTitle: productData.title,
+          customPrompt: settings.customPrompt || undefined,
+          sceneIndex: settings.sceneIndex ?? undefined,
+        }
+      });
+
+      if (imageError) throw imageError;
+      if (imageData.error) throw new Error(imageData.error);
+
+      const newImages = [...result.images];
+      newImages[currentImageIndex] = {
+        image: imageData.image,
+        sceneUsed: imageData.sceneUsed,
+      };
+
+      onUpdateResult({
+        ...result,
+        images: newImages,
+      });
+
+      toast.success('Imagem regenerada!');
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao regenerar imagem');
+    } finally {
+      setIsRegeneratingImage(false);
+    }
+  };
+
+  const handleRegenerateTitle = async () => {
+    setIsRegeneratingTitle(true);
+    try {
+      const { data: captionData, error: captionError } = await supabase.functions.invoke('generate-pinterest-caption', {
+        body: {
+          productTitle: productData.title,
+          sceneDescription: currentImage.sceneUsed,
+          regenerateTitle: true,
+        }
+      });
+
+      if (captionError) throw captionError;
+
+      onUpdateResult({
+        ...result,
+        title: captionData?.title || result.title,
+      });
+
+      toast.success('Título regenerado!');
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao regenerar título');
+    } finally {
+      setIsRegeneratingTitle(false);
+    }
+  };
+
+  const handleRegenerateDescription = async () => {
+    setIsRegeneratingDesc(true);
+    try {
+      const { data: captionData, error: captionError } = await supabase.functions.invoke('generate-pinterest-caption', {
+        body: {
+          productTitle: productData.title,
+          sceneDescription: currentImage.sceneUsed,
+          regenerateDescription: true,
+        }
+      });
+
+      if (captionError) throw captionError;
+
+      onUpdateResult({
+        ...result,
+        description: captionData?.description || result.description,
+      });
+
+      toast.success('Legenda regenerada!');
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao regenerar legenda');
+    } finally {
+      setIsRegeneratingDesc(false);
+    }
+  };
+
+  const nextImage = () => {
+    setCurrentImageIndex((prev) => (prev + 1) % result.images.length);
+  };
+
+  const prevImage = () => {
+    setCurrentImageIndex((prev) => (prev - 1 + result.images.length) % result.images.length);
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
       {/* Generated Image Card */}
-      <Card className="p-6 shadow-card gradient-card">
-        <h2 className="text-2xl font-display font-semibold mb-4 text-center">
-          🎉 Sua imagem está pronta!
+      <Card className="p-4 md:p-6 shadow-card gradient-card">
+        <h2 className="text-xl md:text-2xl font-display font-semibold mb-4 text-center">
+          🎉 {result.images.length === 1 ? 'Sua imagem está pronta!' : `${result.images.length} imagens prontas!`}
         </h2>
         
-        <div className="relative aspect-[9/16] max-w-sm mx-auto rounded-2xl overflow-hidden shadow-glow mb-6">
-          <img
-            src={result.image}
-            alt="Generated Pinterest Image"
-            className="w-full h-full object-cover"
-          />
+        {/* Image Display */}
+        <div className="relative max-w-sm mx-auto mb-4">
+          {/* Navigation Arrows */}
+          {hasMultipleImages && (
+            <>
+              <button
+                onClick={prevImage}
+                className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-3 md:-translate-x-5 z-10 bg-background/80 backdrop-blur-sm rounded-full p-1.5 md:p-2 shadow-lg hover:bg-background transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4 md:w-5 md:h-5" />
+              </button>
+              <button
+                onClick={nextImage}
+                className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-3 md:translate-x-5 z-10 bg-background/80 backdrop-blur-sm rounded-full p-1.5 md:p-2 shadow-lg hover:bg-background transition-colors"
+              >
+                <ChevronRight className="w-4 h-4 md:w-5 md:h-5" />
+              </button>
+            </>
+          )}
+
+          {/* Image Container */}
+          <div className="relative aspect-[9/16] rounded-2xl overflow-hidden shadow-glow">
+            <img
+              src={currentImage.image}
+              alt={`Generated Pinterest Image ${currentImageIndex + 1}`}
+              className="w-full h-full object-cover"
+            />
+            
+            {/* Regenerate Image Button */}
+            <button
+              onClick={handleRegenerateCurrentImage}
+              disabled={isRegeneratingImage}
+              className="absolute top-3 right-3 bg-background/80 backdrop-blur-sm rounded-full p-2 shadow-lg hover:bg-background transition-colors disabled:opacity-50"
+              title="Regenerar esta imagem"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRegeneratingImage ? 'animate-spin' : ''}`} />
+            </button>
+
+            {/* Image Counter */}
+            {hasMultipleImages && (
+              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-background/80 backdrop-blur-sm rounded-full px-3 py-1 text-sm font-medium">
+                {currentImageIndex + 1} / {result.images.length}
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="flex gap-3 justify-center">
-          <Button variant="pinterest" size="lg" onClick={handleSharePinterest}>
-            <ExternalLink className="w-4 h-4" />
-            Publicar no Pinterest
+        {/* Image Thumbnails */}
+        {hasMultipleImages && (
+          <div className="flex justify-center gap-2 mb-4 overflow-x-auto pb-2">
+            {result.images.map((img, index) => (
+              <button
+                key={index}
+                onClick={() => setCurrentImageIndex(index)}
+                className={`flex-shrink-0 w-12 h-16 md:w-14 md:h-20 rounded-lg overflow-hidden border-2 transition-all ${
+                  index === currentImageIndex ? 'border-coral scale-105' : 'border-border opacity-60 hover:opacity-100'
+                }`}
+              >
+                <img src={img.image} alt={`Thumbnail ${index + 1}`} className="w-full h-full object-cover" />
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div className="flex gap-2 md:gap-3 justify-center flex-wrap">
+          <Button variant="pinterest" size="default" onClick={handleSharePinterest} className="gap-2">
+            <PinterestIcon />
+            <span className="hidden sm:inline">Publicar</span>
           </Button>
-          <Button variant="secondary" size="lg" onClick={handleDownload}>
-            Baixar Imagem
+          <Button variant="secondary" size="default" onClick={() => handleDownload(currentImage.image, currentImageIndex)}>
+            <Download className="w-4 h-4" />
+            <span className="hidden sm:inline ml-2">Baixar</span>
           </Button>
+          {hasMultipleImages && (
+            <Button variant="outline" size="default" onClick={() => result.images.forEach((img, i) => handleDownload(img.image, i))}>
+              <Download className="w-4 h-4" />
+              <span className="ml-2">Baixar Todas</span>
+            </Button>
+          )}
         </div>
       </Card>
 
       {/* Title & Caption Card */}
-      <Card className="p-6 shadow-card">
+      <Card className="p-4 md:p-6 shadow-card">
         <h3 className="text-lg font-display font-semibold mb-4">Título e Legenda</h3>
         
         <div className="space-y-4">
@@ -98,8 +273,17 @@ export const ResultStep = ({ result, productTitle, onRegenerate, onReset }: Resu
               <Input
                 value={result.title}
                 readOnly
-                className="flex-1 bg-secondary/50"
+                className="flex-1 bg-secondary/50 text-sm"
               />
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={handleRegenerateTitle}
+                disabled={isRegeneratingTitle}
+                title="Regenerar título"
+              >
+                <RefreshCw className={`w-4 h-4 ${isRegeneratingTitle ? 'animate-spin' : ''}`} />
+              </Button>
               <Button
                 variant="outline"
                 size="icon"
@@ -119,60 +303,38 @@ export const ResultStep = ({ result, productTitle, onRegenerate, onReset }: Resu
               <Textarea
                 value={result.description}
                 readOnly
-                className="flex-1 bg-secondary/50 min-h-[100px]"
+                className="flex-1 bg-secondary/50 min-h-[80px] md:min-h-[100px] text-sm"
               />
-              <Button
-                variant="outline"
-                size="icon"
-                className="self-start"
-                onClick={() => handleCopy(result.description, 'desc')}
-              >
-                {copiedDesc ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-              </Button>
+              <div className="flex flex-col gap-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={handleRegenerateDescription}
+                  disabled={isRegeneratingDesc}
+                  title="Regenerar legenda"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isRegeneratingDesc ? 'animate-spin' : ''}`} />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => handleCopy(result.description, 'desc')}
+                >
+                  {copiedDesc ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                </Button>
+              </div>
             </div>
           </div>
         </div>
       </Card>
 
-      {/* Regenerate Options */}
-      <Card className="p-6 shadow-card">
-        <h3 className="text-lg font-display font-semibold mb-4">Não gostou? Gere novamente!</h3>
-        
-        {!showFeedback ? (
-          <div className="flex gap-3">
-            <Button variant="soft" onClick={onRegenerate} className="flex-1">
-              <RefreshCw className="w-4 h-4" />
-              Gerar Novamente
-            </Button>
-            <Button variant="outline" onClick={() => setShowFeedback(true)} className="flex-1">
-              <MessageSquare className="w-4 h-4" />
-              Gerar com Observação
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <Textarea
-              placeholder="Ex: Quero uma foto mais clara, com fundo mais simples..."
-              value={feedback}
-              onChange={(e) => setFeedback(e.target.value)}
-              className="min-h-[80px]"
-            />
-            <div className="flex gap-3">
-              <Button variant="gradient" onClick={onRegenerate} className="flex-1">
-                <RefreshCw className="w-4 h-4" />
-                Gerar com Feedback
-              </Button>
-              <Button variant="ghost" onClick={() => setShowFeedback(false)}>
-                Cancelar
-              </Button>
-            </div>
-          </div>
-        )}
-      </Card>
-
-      {/* Start Over */}
-      <div className="text-center">
-        <Button variant="ghost" onClick={onReset}>
+      {/* Action Buttons */}
+      <div className="flex flex-col sm:flex-row gap-3 justify-center">
+        <Button variant="soft" onClick={onRegenerate} className="gap-2">
+          <RefreshCw className="w-4 h-4" />
+          Gerar Novas Imagens
+        </Button>
+        <Button variant="ghost" onClick={onReset} className="gap-2">
           <Home className="w-4 h-4" />
           Criar Novo Pin
         </Button>
