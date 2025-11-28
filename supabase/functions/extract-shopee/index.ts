@@ -56,7 +56,16 @@ async function generateShopeeSignature(appId: string, timestamp: number, payload
   return hashHex;
 }
 
-async function extractFromShopee(url: string): Promise<{ title: string; images: string[]; success: boolean; error?: string }> {
+interface ExtractionResult {
+  title: string;
+  images: string[];
+  success: boolean;
+  error?: string;
+  affiliateLink?: string;
+  originalLink?: string;
+}
+
+async function extractFromShopee(url: string): Promise<ExtractionResult> {
   console.log('Detected Shopee URL, extracting product data...');
 
   const appId = Deno.env.get('SHOPEE_APP_ID');
@@ -113,6 +122,16 @@ async function extractFromShopee(url: string): Promise<{ title: string; images: 
       const mobileResult = await tryShopeeApi(itemId, shopId, finalUrl);
       if (mobileResult.images.length > 0) {
         console.log('✅ SUCCESS: Got', mobileResult.images.length, 'gallery images from internal API');
+        
+        // Try to get affiliate link for this product
+        if (appId && appSecret) {
+          const affiliateLink = await generateAffiliateLink(appId, appSecret, finalUrl);
+          if (affiliateLink) {
+            mobileResult.affiliateLink = affiliateLink;
+            mobileResult.originalLink = finalUrl;
+          }
+        }
+        
         return mobileResult;
       }
       console.log('❌ Internal API failed, trying fallbacks...');
@@ -127,6 +146,7 @@ async function extractFromShopee(url: string): Promise<{ title: string; images: 
         const affiliateResult = await searchWithAffiliateApi(appId, appSecret, '', shopId, itemId);
         if (affiliateResult.images.length > 0) {
           console.log('✅ SUCCESS: Got exact product from Affiliate API');
+          affiliateResult.originalLink = finalUrl;
           return affiliateResult;
         }
       }
@@ -136,9 +156,23 @@ async function extractFromShopee(url: string): Promise<{ title: string; images: 
         const affiliateResult = await searchWithAffiliateApi(appId, appSecret, productName.substring(0, 50), null, itemId);
         if (affiliateResult.images.length > 0) {
           console.log('✅ SUCCESS: Got product from Affiliate API keyword search');
+          affiliateResult.originalLink = finalUrl;
           return affiliateResult;
         }
       }
+    }
+
+    // FALLBACK: Try generateShortLink even without product data
+    if (appId && appSecret) {
+      const affiliateLink = await generateAffiliateLink(appId, appSecret, finalUrl);
+      return {
+        title: productName || 'Produto Shopee',
+        images: [],
+        success: false,
+        error: 'Não foi possível extrair imagens deste produto. A Shopee bloqueia requisições automáticas.',
+        affiliateLink: affiliateLink || undefined,
+        originalLink: finalUrl
+      };
     }
 
     // If all else fails
@@ -160,7 +194,66 @@ async function extractFromShopee(url: string): Promise<{ title: string; images: 
   }
 }
 
-async function searchWithAffiliateApi(appId: string, appSecret: string, keyword: string, shopId: string | null, itemId: string | null): Promise<{ title: string; images: string[]; success: boolean }> {
+async function generateAffiliateLink(appId: string, appSecret: string, originalUrl: string): Promise<string | null> {
+  try {
+    const timestamp = Math.floor(Date.now() / 1000);
+    
+    const graphqlQuery = {
+      query: `mutation {
+        generateShortLink(input: {
+          originUrl: "${originalUrl}"
+          subIds: ["pingen"]
+        }) {
+          shortLink
+        }
+      }`
+    };
+
+    const payload = JSON.stringify(graphqlQuery);
+    const signature = await generateShopeeSignature(appId, timestamp, payload, appSecret);
+
+    console.log('🔗 Generating affiliate link with generateShortLink...');
+
+    const apiResponse = await fetch('https://open-api.affiliate.shopee.com.br/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${signature}`,
+      },
+      body: payload,
+    });
+
+    const responseText = await apiResponse.text();
+    console.log('generateShortLink response status:', apiResponse.status);
+
+    if (!apiResponse.ok) {
+      console.error('generateShortLink API error:', responseText);
+      return null;
+    }
+
+    const apiData = JSON.parse(responseText);
+    
+    if (apiData.errors && apiData.errors.length > 0) {
+      console.error('generateShortLink GraphQL errors:', apiData.errors);
+      return null;
+    }
+
+    const shortLink = apiData.data?.generateShortLink?.shortLink;
+    if (shortLink) {
+      console.log('✅ Generated affiliate link:', shortLink);
+      return shortLink;
+    }
+
+    console.log('❌ No shortLink in response');
+    return null;
+
+  } catch (error) {
+    console.error('Error generating affiliate link:', error);
+    return null;
+  }
+}
+
+async function searchWithAffiliateApi(appId: string, appSecret: string, keyword: string, shopId: string | null, itemId: string | null): Promise<ExtractionResult> {
   try {
     const timestamp = Math.floor(Date.now() / 1000);
     
@@ -188,6 +281,7 @@ async function searchWithAffiliateApi(appId: string, appSecret: string, keyword:
             price
             commissionRate
             productLink
+            offerLink
           }
         }
       }`
@@ -238,10 +332,12 @@ async function searchWithAffiliateApi(appId: string, appSecret: string, keyword:
 
       if (exactProduct) {
         console.log('✅ Found exact product match by itemId:', exactProduct.productName);
+        console.log('📎 offerLink:', exactProduct.offerLink);
         return {
           title: exactProduct.productName || '',
           images: exactProduct.imageUrl ? [exactProduct.imageUrl] : [],
-          success: true
+          success: true,
+          affiliateLink: exactProduct.offerLink || undefined
         };
       } else {
         console.log('⚠️ No exact match found for itemId:', itemId);
@@ -255,7 +351,8 @@ async function searchWithAffiliateApi(appId: string, appSecret: string, keyword:
     return {
       title: firstProduct.productName || '',
       images: firstProduct.imageUrl ? [firstProduct.imageUrl] : [],
-      success: true
+      success: true,
+      affiliateLink: firstProduct.offerLink || undefined
     };
 
   } catch (error) {
@@ -264,7 +361,7 @@ async function searchWithAffiliateApi(appId: string, appSecret: string, keyword:
   }
 }
 
-async function tryShopeeApi(itemId: string, shopId: string, referer: string): Promise<{ title: string; images: string[]; success: boolean }> {
+async function tryShopeeApi(itemId: string, shopId: string, referer: string): Promise<ExtractionResult> {
   // Different User-Agent strategies
   const userAgents = [
     // Mobile Safari
@@ -392,7 +489,7 @@ async function tryShopeeApi(itemId: string, shopId: string, referer: string): Pr
   return { title: '', images: [], success: false };
 }
 
-async function extractGeneric(url: string): Promise<{ title: string; images: string[]; success: boolean; error?: string }> {
+async function extractGeneric(url: string): Promise<ExtractionResult> {
   console.log('Using generic extraction for:', url);
 
   try {
@@ -498,28 +595,24 @@ function isProductImage(url: string): boolean {
     'logo', 'icon', 'avatar', 'banner', 'sprite', 'pixel', 'tracking',
     'analytics', 'facebook', 'twitter', 'instagram', 'social', 'badge',
     'button', 'arrow', 'loading', 'spinner', 'placeholder', 'blank',
-    '1x1', 'spacer', 'transparent', 'advertisement', 'ad-', 'ads-',
-    'favicon', 'emoji', 'svg', 'splash_screen', 'splash-screen'
+    'transparent', '1x1', 'spacer', 'ads', 'advertisement', 'promo-bar',
+    'header-', 'footer-', 'nav-', 'menu-', 'payment', 'shipping',
+    'trustpilot', 'review-star', 'rating', 'selo', 'stamp'
   ];
-  
+
   for (const pattern of excludePatterns) {
     if (lowerUrl.includes(pattern)) {
       return false;
     }
   }
-  
+
   return true;
 }
 
 function cleanImageUrl(url: string): string {
   try {
-    return url
-      .replace(/_tn\./g, '.')
-      .replace(/\/tn\//g, '/')
-      .replace(/_thumb/g, '')
-      .replace(/_small/g, '')
-      .replace(/_medium/g, '')
-      .replace(/\?.*$/, '');
+    const cleanUrl = url.split('?')[0];
+    return cleanUrl.replace(/_\d+x\d+\.(jpg|png|webp|jpeg)$/i, '.$1');
   } catch {
     return url;
   }
