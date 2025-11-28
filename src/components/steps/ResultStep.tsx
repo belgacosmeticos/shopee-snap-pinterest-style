@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
-import { Copy, RefreshCw, Home, Check, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Copy, RefreshCw, Home, Check, Download, ChevronLeft, ChevronRight, ExternalLink, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import type { GeneratedResult, ProductData, GenerationSettings, GeneratedImage } from '../PinGenTool';
@@ -28,6 +28,7 @@ export const ResultStep = ({ result, productData, settings, onRegenerate, onRese
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copiedTitle, setCopiedTitle] = useState(false);
   const [copiedDesc, setCopiedDesc] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [isRegeneratingImage, setIsRegeneratingImage] = useState(false);
   const [isRegeneratingTitle, setIsRegeneratingTitle] = useState(false);
   const [isRegeneratingDesc, setIsRegeneratingDesc] = useState(false);
@@ -35,14 +36,17 @@ export const ResultStep = ({ result, productData, settings, onRegenerate, onRese
   const currentImage = result.images[currentImageIndex];
   const hasMultipleImages = result.images.length > 1;
 
-  const handleCopy = async (text: string, type: 'title' | 'desc') => {
+  const handleCopy = async (text: string, type: 'title' | 'desc' | 'link') => {
     await navigator.clipboard.writeText(text);
     if (type === 'title') {
       setCopiedTitle(true);
       setTimeout(() => setCopiedTitle(false), 2000);
-    } else {
+    } else if (type === 'desc') {
       setCopiedDesc(true);
       setTimeout(() => setCopiedDesc(false), 2000);
+    } else {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
     }
     toast.success('Copiado!');
   };
@@ -258,6 +262,48 @@ export const ResultStep = ({ result, productData, settings, onRegenerate, onRese
           )}
         </div>
       </Card>
+
+      {/* Affiliate Link Card */}
+      {productData.affiliateLink && (
+        <Card className="p-4 md:p-6 shadow-card border-2 border-green-500/20 bg-green-500/5">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center">
+              <DollarSign className="w-4 h-4 text-green-600" />
+            </div>
+            <h3 className="text-lg font-display font-semibold text-green-700 dark:text-green-400">
+              Link de Afiliado
+            </h3>
+          </div>
+          
+          <div className="flex gap-2">
+            <Input
+              value={productData.affiliateLink}
+              readOnly
+              className="flex-1 bg-background text-sm font-mono"
+            />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => window.open(productData.affiliateLink, '_blank')}
+              title="Abrir link"
+            >
+              <ExternalLink className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="default"
+              size="icon"
+              className="bg-green-600 hover:bg-green-700"
+              onClick={() => handleCopy(productData.affiliateLink!, 'link')}
+            >
+              {copiedLink ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+            </Button>
+          </div>
+          
+          <p className="text-xs text-muted-foreground mt-2">
+            Use este link para ganhar comissão nas vendas. Inclua na descrição do seu pin!
+          </p>
+        </Card>
+      )}
 
       {/* Title & Caption Card */}
       <Card className="p-4 md:p-6 shadow-card">

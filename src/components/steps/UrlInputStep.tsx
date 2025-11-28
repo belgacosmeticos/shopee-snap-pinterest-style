@@ -7,7 +7,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 interface UrlInputStepProps {
-  onSubmit: (data: { title: string; images: string[] }) => void;
+  onSubmit: (data: { title: string; images: string[]; affiliateLink?: string; originalLink?: string }) => void;
   isLoading: boolean;
   setIsLoading: (loading: boolean) => void;
 }
@@ -56,7 +56,12 @@ export const UrlInputStep = ({ onSubmit, isLoading, setIsLoading }: UrlInputStep
       }
 
       toast.success(`${data.images.length} imagens encontradas!`);
-      onSubmit({ title: data.title, images: data.images });
+      onSubmit({ 
+        title: data.title, 
+        images: data.images,
+        affiliateLink: data.affiliateLink,
+        originalLink: data.originalLink
+      });
     } catch (err) {
       console.error('Erro ao processar link:', {
         url: url.trim(),

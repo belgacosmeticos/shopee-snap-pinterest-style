@@ -10,6 +10,8 @@ export interface ProductData {
   title: string;
   images: string[];
   selectedImage: string;
+  affiliateLink?: string;
+  originalLink?: string;
 }
 
 export interface GeneratedImage {
@@ -36,7 +38,7 @@ export const PinGenTool = () => {
   const [generationSettings, setGenerationSettings] = useState<GenerationSettings | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleUrlSubmit = (data: { title: string; images: string[] }) => {
+  const handleUrlSubmit = (data: { title: string; images: string[]; affiliateLink?: string; originalLink?: string }) => {
     setProductData({ ...data, selectedImage: '' });
     setCurrentStep('select');
   };
