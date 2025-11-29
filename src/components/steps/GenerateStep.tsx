@@ -33,6 +33,7 @@ export const GenerateStep = ({ productData, onGenerate, onBack, initialSettings 
   const [quantity, setQuantity] = useState(initialSettings?.quantity ?? 1);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingCount, setGeneratingCount] = useState(0);
+  const [loadingPhase, setLoadingPhase] = useState<'generating' | 'optimizing' | 'caption'>('generating');
 
   const generateSingleImage = async (): Promise<GeneratedImage> => {
     const { data: imageData, error: imageError } = await supabase.functions.invoke('generate-pinterest-image', {
@@ -56,6 +57,7 @@ export const GenerateStep = ({ productData, onGenerate, onBack, initialSettings 
   const handleGenerate = async () => {
     setIsGenerating(true);
     setGeneratingCount(0);
+    setLoadingPhase('generating');
 
     try {
       // Generate images in parallel (but with some staggering to avoid rate limits)
@@ -76,7 +78,12 @@ export const GenerateStep = ({ productData, onGenerate, onBack, initialSettings 
 
       const images = await Promise.all(imagePromises);
 
+      // Show optimizing phase briefly (metadata is stripped server-side, but show feedback)
+      setLoadingPhase('optimizing');
+      await new Promise(resolve => setTimeout(resolve, 800));
+
       // Generate the caption based on first image's scene
+      setLoadingPhase('caption');
       const { data: captionData, error: captionError } = await supabase.functions.invoke('generate-pinterest-caption', {
         body: {
           productTitle: productData.title,
@@ -105,6 +112,7 @@ export const GenerateStep = ({ productData, onGenerate, onBack, initialSettings 
     } finally {
       setIsGenerating(false);
       setGeneratingCount(0);
+      setLoadingPhase('generating');
     }
   };
 
@@ -213,7 +221,9 @@ export const GenerateStep = ({ productData, onGenerate, onBack, initialSettings 
         {isGenerating ? (
           <>
             <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-            Gerando {generatingCount}/{quantity}...
+            {loadingPhase === 'generating' && `Gerando ${generatingCount}/${quantity}...`}
+            {loadingPhase === 'optimizing' && 'Otimizando imagem...'}
+            {loadingPhase === 'caption' && 'Criando legenda...'}
           </>
         ) : (
           <>
@@ -225,7 +235,9 @@ export const GenerateStep = ({ productData, onGenerate, onBack, initialSettings 
 
       {isGenerating && (
         <p className="text-center text-sm text-muted-foreground mt-4 animate-pulse">
-          ✨ Criando suas fotos estilo Pinterest... Isso pode levar alguns segundos.
+          {loadingPhase === 'generating' && '✨ Criando suas fotos estilo Pinterest...'}
+          {loadingPhase === 'optimizing' && '🔧 Removendo metadados de IA...'}
+          {loadingPhase === 'caption' && '📝 Gerando título e descrição...'}
         </p>
       )}
     </Card>
