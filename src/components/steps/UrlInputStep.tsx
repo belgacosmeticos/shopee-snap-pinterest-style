@@ -28,47 +28,54 @@ export const UrlInputStep = ({ onSubmit, isLoading, setIsLoading }: UrlInputStep
     setIsLoading(true);
 
     try {
-      const { data, error: fnError } = await supabase.functions.invoke('extract-shopee', {
+      console.log('[UrlInputStep] Iniciando extração para:', url.trim());
+      
+      const response = await supabase.functions.invoke('extract-shopee', {
         body: { url: url.trim() }
       });
 
-      if (fnError) throw fnError;
+      console.log('[UrlInputStep] Resposta da função:', response);
+
+      if (response.error) {
+        console.error('[UrlInputStep] Erro da função:', response.error);
+        setError('Erro ao conectar com o servidor. Tente novamente.');
+        return;
+      }
+
+      const data = response.data;
+
+      if (!data) {
+        console.error('[UrlInputStep] Resposta vazia da função');
+        setError('Resposta inválida do servidor. Tente novamente.');
+        return;
+      }
 
       if (data.error) {
-        console.error('Erro na extração Shopee:', {
-          url: url.trim(),
-          error: data.error,
-          response: data
-        });
+        console.error('[UrlInputStep] Erro na extração:', data.error);
         setError(data.error);
         return;
       }
 
-      if (!data.images || data.images.length === 0) {
-        console.error('Nenhuma imagem encontrada:', {
-          url: url.trim(),
-          title: data.title,
-          imagesCount: data.images?.length || 0,
-          fullResponse: data
-        });
+      if (!data.images || !Array.isArray(data.images) || data.images.length === 0) {
+        console.error('[UrlInputStep] Nenhuma imagem encontrada:', data);
         setError('Não foi possível encontrar imagens neste produto. Tente outro link.');
         return;
       }
 
+      console.log('[UrlInputStep] Sucesso! Imagens encontradas:', data.images.length);
       toast.success(`${data.images.length} imagens encontradas!`);
+      
       onSubmit({ 
-        title: data.title, 
+        title: data.title || 'Produto', 
         images: data.images,
         affiliateLink: data.affiliateLink,
         originalLink: data.originalLink
       });
     } catch (err) {
-      console.error('Erro ao processar link:', {
-        url: url.trim(),
-        error: err,
-        message: err instanceof Error ? err.message : 'Erro desconhecido'
-      });
-      setError('Erro ao processar o link. Verifique se é um link válido da Shopee.');
+      console.error('[UrlInputStep] Erro inesperado:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
+      console.error('[UrlInputStep] Mensagem:', errorMessage);
+      setError('Erro ao processar o link. Verifique se é um link válido.');
     } finally {
       setIsLoading(false);
     }
