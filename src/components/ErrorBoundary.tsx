@@ -22,12 +22,19 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('ErrorBoundary caught error:', error, errorInfo);
+    console.error('[ErrorBoundary] Error caught:', error.message);
+    console.error('[ErrorBoundary] Stack:', error.stack);
+    console.error('[ErrorBoundary] Component Stack:', errorInfo.componentStack);
   }
 
   private handleReset = () => {
     this.setState({ hasError: false, error: undefined });
     window.location.reload();
+  };
+
+  private handleGoHome = () => {
+    this.setState({ hasError: false, error: undefined });
+    window.location.href = '/';
   };
 
   public render() {
@@ -39,13 +46,26 @@ export class ErrorBoundary extends Component<Props, State> {
               <AlertTriangle className="w-8 h-8 text-destructive" />
             </div>
             <h2 className="text-xl font-semibold mb-2">Ops! Algo deu errado</h2>
-            <p className="text-muted-foreground mb-6">
+            <p className="text-muted-foreground mb-4">
               Ocorreu um erro inesperado. Por favor, tente novamente.
             </p>
-            <Button onClick={this.handleReset} variant="gradient" className="w-full">
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Recarregar página
-            </Button>
+            {this.state.error && (
+              <details className="text-left mb-4 p-3 bg-muted rounded-lg text-sm">
+                <summary className="cursor-pointer text-muted-foreground">Detalhes do erro</summary>
+                <pre className="mt-2 text-xs overflow-auto max-h-32 text-destructive">
+                  {this.state.error.message}
+                </pre>
+              </details>
+            )}
+            <div className="space-y-2">
+              <Button onClick={this.handleGoHome} variant="gradient" className="w-full">
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Voltar ao início
+              </Button>
+              <Button onClick={this.handleReset} variant="outline" className="w-full">
+                Recarregar página
+              </Button>
+            </div>
           </Card>
         </div>
       );
