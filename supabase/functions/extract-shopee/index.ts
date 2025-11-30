@@ -143,7 +143,7 @@ async function extractFromShopee(url: string): Promise<ExtractionResult> {
       
       // First try with shopId to get shop products, then filter by itemId
       if (shopId) {
-        const affiliateResult = await searchWithAffiliateApi(appId, appSecret, '', shopId, itemId);
+        const affiliateResult = await searchWithAffiliateApi(appId, appSecret, '', shopId, itemId, finalUrl);
         if (affiliateResult.images.length > 0) {
           console.log('✅ SUCCESS: Got exact product from Affiliate API');
           affiliateResult.originalLink = finalUrl;
@@ -153,7 +153,7 @@ async function extractFromShopee(url: string): Promise<ExtractionResult> {
       
       // Try with keyword if we have product name
       if (productName) {
-        const affiliateResult = await searchWithAffiliateApi(appId, appSecret, productName.substring(0, 50), null, itemId);
+        const affiliateResult = await searchWithAffiliateApi(appId, appSecret, productName.substring(0, 50), null, itemId, finalUrl);
         if (affiliateResult.images.length > 0) {
           console.log('✅ SUCCESS: Got product from Affiliate API keyword search');
           affiliateResult.originalLink = finalUrl;
@@ -253,7 +253,7 @@ async function generateAffiliateLink(appId: string, appSecret: string, originalU
   }
 }
 
-async function searchWithAffiliateApi(appId: string, appSecret: string, keyword: string, shopId: string | null, itemId: string | null): Promise<ExtractionResult> {
+async function searchWithAffiliateApi(appId: string, appSecret: string, keyword: string, shopId: string | null, itemId: string | null, finalUrl?: string): Promise<ExtractionResult> {
   try {
     const timestamp = Math.floor(Date.now() / 1000);
     
@@ -333,15 +333,32 @@ async function searchWithAffiliateApi(appId: string, appSecret: string, keyword:
       if (exactProduct) {
         console.log('✅ Found exact product match by itemId:', exactProduct.productName);
         console.log('📎 offerLink:', exactProduct.offerLink);
+        
+        let images = exactProduct.imageUrl ? [exactProduct.imageUrl] : [];
+        
+        // Try to get more images from HTML parsing if we only have 1 image
+        if (images.length <= 1 && finalUrl) {
+          console.log('🔍 Trying to extract more images from HTML...');
+          const moreImages = await extractImagesFromHtml(finalUrl);
+          if (moreImages.length > 0) {
+            console.log(`📸 Found ${moreImages.length} additional images from HTML`);
+            // Add unique images
+            for (const img of moreImages) {
+              if (!images.includes(img)) {
+                images.push(img);
+              }
+            }
+          }
+        }
+        
         return {
           title: exactProduct.productName || '',
-          images: exactProduct.imageUrl ? [exactProduct.imageUrl] : [],
+          images,
           success: true,
           affiliateLink: exactProduct.offerLink || undefined
         };
       } else {
         console.log('⚠️ No exact match found for itemId:', itemId);
-        // Return empty if we can't find exact match - don't return wrong products
         return { title: '', images: [], success: false };
       }
     }
@@ -358,6 +375,101 @@ async function searchWithAffiliateApi(appId: string, appSecret: string, keyword:
   } catch (error) {
     console.error('Error in Affiliate API search:', error);
     return { title: '', images: [], success: false };
+  }
+}
+
+// Helper function to extract images from HTML
+async function extractImagesFromHtml(url: string): Promise<string[]> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+      },
+    });
+
+    if (!response.ok) {
+      console.log('HTML fetch failed:', response.status);
+      return [];
+    }
+
+    const html = await response.text();
+    const images: string[] = [];
+
+    // Extract images from JSON-LD structured data
+    const jsonLdMatches = html.matchAll(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi);
+    for (const match of jsonLdMatches) {
+      try {
+        const jsonData = JSON.parse(match[1]);
+        if (jsonData.image) {
+          if (Array.isArray(jsonData.image)) {
+            images.push(...jsonData.image.filter((img: string) => typeof img === 'string'));
+          } else if (typeof jsonData.image === 'string') {
+            images.push(jsonData.image);
+          }
+        }
+      } catch {}
+    }
+
+    // Extract from window.__INITIAL_STATE__ or similar
+    const initialStateMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*({[\s\S]*?});?\s*<\/script>/);
+    if (initialStateMatch) {
+      try {
+        const stateData = JSON.parse(initialStateMatch[1]);
+        // Look for images in common paths
+        const findImages = (obj: any, depth = 0): string[] => {
+          if (depth > 5) return [];
+          const found: string[] = [];
+          if (typeof obj !== 'object' || !obj) return found;
+          
+          for (const [key, value] of Object.entries(obj)) {
+            if (key === 'images' && Array.isArray(value)) {
+              for (const img of value) {
+                if (typeof img === 'string') {
+                  const imgUrl = img.startsWith('http') ? img : `https://cf.shopee.com.br/file/${img}`;
+                  found.push(imgUrl);
+                }
+              }
+            } else if (key === 'image' && typeof value === 'string') {
+              const imgUrl = value.startsWith('http') ? value : `https://cf.shopee.com.br/file/${value}`;
+              found.push(imgUrl);
+            } else if (typeof value === 'object' && value) {
+              found.push(...findImages(value, depth + 1));
+            }
+          }
+          return found;
+        };
+        
+        const stateImages = findImages(stateData);
+        images.push(...stateImages);
+      } catch (e) {
+        console.log('Failed to parse INITIAL_STATE:', e);
+      }
+    }
+
+    // Extract from cf.shopee.com.br file URLs in HTML
+    const cfMatches = html.matchAll(/https?:\/\/cf\.shopee\.com\.br\/file\/[a-zA-Z0-9_-]+/g);
+    for (const match of cfMatches) {
+      if (!images.includes(match[0])) {
+        images.push(match[0]);
+      }
+    }
+
+    // Filter out small images (thumbnails, icons) by checking common patterns
+    const filteredImages = images.filter(img => {
+      const isSmall = /(_tn|_thumb|icon|logo|banner|placeholder)/i.test(img);
+      return !isSmall;
+    });
+
+    // Remove duplicates and limit to first 10
+    const uniqueImages = [...new Set(filteredImages)].slice(0, 10);
+    console.log(`📷 Extracted ${uniqueImages.length} unique images from HTML`);
+    
+    return uniqueImages;
+  } catch (error) {
+    console.error('Error extracting images from HTML:', error);
+    return [];
   }
 }
 
