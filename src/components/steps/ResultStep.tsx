@@ -8,8 +8,8 @@ import { Copy, RefreshCw, Home, Check, Download, ChevronLeft, ChevronRight, Exte
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { usePinterestAuth } from '@/hooks/usePinterestAuth';
-import type { GeneratedResult, ProductData, GenerationSettings, GeneratedImage } from '../PinGenTool';
-import type { PublishMode } from '../PinterestModeToggle';
+import { PinterestModeToggle, PublishMode } from '../PinterestModeToggle';
+import type { GeneratedResult, ProductData, GenerationSettings } from '../PinGenTool';
 
 // Pinterest SVG icon
 const PinterestIcon = () => (
@@ -22,13 +22,12 @@ interface ResultStepProps {
   result: GeneratedResult;
   productData: ProductData;
   settings: GenerationSettings;
-  publishMode: PublishMode;
   onRegenerate: () => void;
   onReset: () => void;
   onUpdateResult: (result: GeneratedResult) => void;
 }
 
-export const ResultStep = ({ result, productData, settings, publishMode, onRegenerate, onReset, onUpdateResult }: ResultStepProps) => {
+export const ResultStep = ({ result, productData, settings, onRegenerate, onReset, onUpdateResult }: ResultStepProps) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copiedTitle, setCopiedTitle] = useState(false);
   const [copiedDesc, setCopiedDesc] = useState(false);
@@ -38,6 +37,7 @@ export const ResultStep = ({ result, productData, settings, publishMode, onRegen
   const [isRegeneratingDesc, setIsRegeneratingDesc] = useState(false);
   const [selectedBoardId, setSelectedBoardId] = useState<string>('');
   const [isPublishing, setIsPublishing] = useState(false);
+  const [publishMode, setPublishMode] = useState<PublishMode>('manual');
 
   const pinterest = usePinterestAuth();
   const currentImage = result.images[currentImageIndex];
@@ -286,6 +286,18 @@ export const ResultStep = ({ result, productData, settings, publishMode, onRegen
             ))}
           </div>
         )}
+
+        {/* Publish Mode Toggle */}
+        <div className="mb-4">
+          <PinterestModeToggle
+            mode={publishMode}
+            onModeChange={setPublishMode}
+            isConnected={pinterest.isConnected}
+            isLoading={pinterest.isLoading}
+            onConnect={pinterest.connect}
+            onDisconnect={pinterest.disconnect}
+          />
+        </div>
 
         {/* Pinterest Mode: Board Selection & Publish */}
         {publishMode === 'pinterest' && pinterest.isConnected && (
