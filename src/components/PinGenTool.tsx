@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { UrlInputStep } from './steps/UrlInputStep';
 import { ImageSelectStep } from './steps/ImageSelectStep';
 import { GenerateStep } from './steps/GenerateStep';
 import { ResultStep } from './steps/ResultStep';
+import { usePinterestAuth } from '@/hooks/usePinterestAuth';
 
 export type Step = 'input' | 'select' | 'generate' | 'result';
 
@@ -37,6 +38,12 @@ export const PinGenTool = () => {
   const [generatedResult, setGeneratedResult] = useState<GeneratedResult | null>(null);
   const [generationSettings, setGenerationSettings] = useState<GenerationSettings | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  
+  const pinterest = usePinterestAuth();
+  
+  const handleFetchBoards = useCallback(() => {
+    pinterest.fetchBoards();
+  }, [pinterest]);
 
   const handleUrlSubmit = (data: { title: string; images: string[]; affiliateLink?: string; originalLink?: string }) => {
     setProductData({ ...data, selectedImage: '' });
@@ -102,7 +109,15 @@ export const PinGenTool = () => {
         {/* Step Content */}
         <main className="animate-fade-in">
           {currentStep === 'input' && (
-            <UrlInputStep onSubmit={handleUrlSubmit} isLoading={isLoading} setIsLoading={setIsLoading} />
+            <UrlInputStep 
+              onSubmit={handleUrlSubmit} 
+              isLoading={isLoading} 
+              setIsLoading={setIsLoading}
+              isPinterestConnected={pinterest.isConnected}
+              isPinterestLoading={pinterest.isLoading}
+              onPinterestConnectWithToken={pinterest.connectWithToken}
+              onPinterestDisconnect={pinterest.disconnect}
+            />
           )}
           
           {currentStep === 'select' && productData && (
@@ -131,6 +146,11 @@ export const PinGenTool = () => {
               onRegenerate={handleRegenerate}
               onReset={handleReset}
               onUpdateResult={setGeneratedResult}
+              isPinterestConnected={pinterest.isConnected}
+              pinterestBoards={pinterest.boards}
+              isLoadingBoards={pinterest.isLoadingBoards}
+              onFetchBoards={handleFetchBoards}
+              onCreatePin={pinterest.createPin}
             />
           )}
         </main>
