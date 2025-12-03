@@ -39,3 +39,15 @@ verify_jwt = false
 
 [functions.generate-pinterest-caption]
 verify_jwt = false
+
+[functions.pinterest-auth]
+verify_jwt = false
+
+[functions.pinterest-callback]
+verify_jwt = false
+
+[functions.pinterest-boards]
+verify_jwt = false
+
+[functions.pinterest-create-pin]
+verify_jwt = false

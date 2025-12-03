@@ -3,6 +3,7 @@ import { UrlInputStep } from './steps/UrlInputStep';
 import { ImageSelectStep } from './steps/ImageSelectStep';
 import { GenerateStep } from './steps/GenerateStep';
 import { ResultStep } from './steps/ResultStep';
+import type { PublishMode } from './PinterestModeToggle';
 
 export type Step = 'input' | 'select' | 'generate' | 'result';
 
@@ -37,9 +38,11 @@ export const PinGenTool = () => {
   const [generatedResult, setGeneratedResult] = useState<GeneratedResult | null>(null);
   const [generationSettings, setGenerationSettings] = useState<GenerationSettings | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [publishMode, setPublishMode] = useState<PublishMode>('manual');
 
-  const handleUrlSubmit = (data: { title: string; images: string[]; affiliateLink?: string; originalLink?: string }) => {
+  const handleUrlSubmit = (data: { title: string; images: string[]; affiliateLink?: string; originalLink?: string }, mode: PublishMode) => {
     setProductData({ ...data, selectedImage: '' });
+    setPublishMode(mode);
     setCurrentStep('select');
   };
 
@@ -128,6 +131,7 @@ export const PinGenTool = () => {
               result={generatedResult}
               productData={productData}
               settings={generationSettings}
+              publishMode={publishMode}
               onRegenerate={handleRegenerate}
               onReset={handleReset}
               onUpdateResult={setGeneratedResult}
