@@ -295,6 +295,7 @@ export const ResultStep = ({ result, productData, settings, onRegenerate, onRese
             isConnected={pinterest.isConnected}
             isLoading={pinterest.isLoading}
             onConnect={pinterest.connect}
+            onConnectWithToken={pinterest.connectWithToken}
             onDisconnect={pinterest.disconnect}
           />
         </div>
