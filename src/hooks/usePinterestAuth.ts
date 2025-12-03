@@ -115,6 +115,18 @@ export const usePinterestAuth = () => {
     }
   };
 
+  // Connect with sandbox token (manual entry)
+  const connectWithToken = (token: string) => {
+    if (!token || !token.trim()) {
+      toast.error('Token inválido');
+      return false;
+    }
+    // Sandbox tokens typically last 30 days
+    saveTokens(token.trim(), undefined, 30 * 24 * 60 * 60);
+    toast.success('Pinterest conectado com token sandbox!');
+    return true;
+  };
+
   // Disconnect (clear tokens)
   const disconnect = () => {
     localStorage.removeItem(STORAGE_KEY);
@@ -196,6 +208,7 @@ export const usePinterestAuth = () => {
     boards,
     isLoadingBoards,
     connect,
+    connectWithToken,
     disconnect,
     fetchBoards,
     createPin,

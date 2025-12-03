@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Check, Loader2 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Check, Loader2, Key } from 'lucide-react';
 
 // Pinterest SVG icon
 const PinterestIcon = ({ className }: { className?: string }) => (
@@ -16,6 +18,7 @@ interface PinterestModeToggleProps {
   isConnected: boolean;
   isLoading: boolean;
   onConnect: () => void;
+  onConnectWithToken: (token: string) => boolean;
   onDisconnect: () => void;
 }
 
@@ -25,8 +28,19 @@ export const PinterestModeToggle = ({
   isConnected,
   isLoading,
   onConnect,
+  onConnectWithToken,
   onDisconnect,
 }: PinterestModeToggleProps) => {
+  const [sandboxToken, setSandboxToken] = useState('');
+  const [showTokenInput, setShowTokenInput] = useState(false);
+
+  const handleConnectWithToken = () => {
+    if (onConnectWithToken(sandboxToken)) {
+      setSandboxToken('');
+      setShowTokenInput(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
       {/* Mode Toggle */}
@@ -77,20 +91,63 @@ export const PinterestModeToggle = ({
               </Button>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
                 Conecte sua conta do Pinterest para publicar pins diretamente.
               </p>
-              <Button
-                type="button"
-                variant="pinterest"
-                size="sm"
-                onClick={onConnect}
-                className="w-full gap-2"
-              >
-                <PinterestIcon className="w-4 h-4 fill-current" />
-                Conectar Pinterest
-              </Button>
+              
+              {/* Sandbox Token Input */}
+              {showTokenInput ? (
+                <div className="space-y-2">
+                  <Input
+                    type="password"
+                    placeholder="Cole seu token sandbox (pina_...)"
+                    value={sandboxToken}
+                    onChange={(e) => setSandboxToken(e.target.value)}
+                    className="text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      onClick={handleConnectWithToken}
+                      disabled={!sandboxToken.trim()}
+                      className="flex-1 gap-2"
+                    >
+                      <Key className="w-4 h-4" />
+                      Conectar
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setShowTokenInput(false);
+                        setSandboxToken('');
+                      }}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Pegue o token em: Pinterest Developers → Seu App → Generate access token
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowTokenInput(true)}
+                    className="w-full gap-2"
+                  >
+                    <Key className="w-4 h-4" />
+                    Conectar com Token Sandbox
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </div>
