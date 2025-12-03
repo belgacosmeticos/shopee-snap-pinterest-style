@@ -5,9 +5,11 @@ import { Card } from '@/components/ui/card';
 import { Link, Sparkles, AlertCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { PinterestModeToggle, PublishMode } from '../PinterestModeToggle';
+import { usePinterestAuth } from '@/hooks/usePinterestAuth';
 
 interface UrlInputStepProps {
-  onSubmit: (data: { title: string; images: string[]; affiliateLink?: string; originalLink?: string }) => void;
+  onSubmit: (data: { title: string; images: string[]; affiliateLink?: string; originalLink?: string }, publishMode: PublishMode) => void;
   isLoading: boolean;
   setIsLoading: (loading: boolean) => void;
 }
@@ -15,6 +17,9 @@ interface UrlInputStepProps {
 export const UrlInputStep = ({ onSubmit, isLoading, setIsLoading }: UrlInputStepProps) => {
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
+  const [publishMode, setPublishMode] = useState<PublishMode>('manual');
+  
+  const pinterest = usePinterestAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,6 +27,12 @@ export const UrlInputStep = ({ onSubmit, isLoading, setIsLoading }: UrlInputStep
 
     if (!url.trim()) {
       setError('Por favor, insira um link do produto');
+      return;
+    }
+
+    // If Pinterest mode selected but not connected, show error
+    if (publishMode === 'pinterest' && !pinterest.isConnected) {
+      setError('Conecte sua conta do Pinterest primeiro');
       return;
     }
 
@@ -70,7 +81,7 @@ export const UrlInputStep = ({ onSubmit, isLoading, setIsLoading }: UrlInputStep
         images: data.images,
         affiliateLink: data.affiliateLink,
         originalLink: data.originalLink
-      });
+      }, publishMode);
     } catch (err) {
       console.error('[UrlInputStep] Erro inesperado:', err);
       const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
@@ -107,6 +118,16 @@ export const UrlInputStep = ({ onSubmit, isLoading, setIsLoading }: UrlInputStep
             disabled={isLoading}
           />
         </div>
+
+        {/* Pinterest Mode Toggle */}
+        <PinterestModeToggle
+          mode={publishMode}
+          onModeChange={setPublishMode}
+          isConnected={pinterest.isConnected}
+          isLoading={pinterest.isLoading}
+          onConnect={pinterest.connect}
+          onDisconnect={pinterest.disconnect}
+        />
 
         {error && (
           <div className="flex items-center gap-2 text-destructive text-sm">
