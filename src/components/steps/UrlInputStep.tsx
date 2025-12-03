@@ -5,14 +5,27 @@ import { Card } from '@/components/ui/card';
 import { Link, Sparkles, AlertCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { PinterestConnector } from '../PinterestConnector';
 
 interface UrlInputStepProps {
   onSubmit: (data: { title: string; images: string[]; affiliateLink?: string; originalLink?: string }) => void;
   isLoading: boolean;
   setIsLoading: (loading: boolean) => void;
+  isPinterestConnected: boolean;
+  isPinterestLoading: boolean;
+  onPinterestConnectWithToken: (token: string) => boolean;
+  onPinterestDisconnect: () => void;
 }
 
-export const UrlInputStep = ({ onSubmit, isLoading, setIsLoading }: UrlInputStepProps) => {
+export const UrlInputStep = ({ 
+  onSubmit, 
+  isLoading, 
+  setIsLoading,
+  isPinterestConnected,
+  isPinterestLoading,
+  onPinterestConnectWithToken,
+  onPinterestDisconnect,
+}: UrlInputStepProps) => {
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
 
@@ -83,6 +96,16 @@ export const UrlInputStep = ({ onSubmit, isLoading, setIsLoading }: UrlInputStep
 
   return (
     <Card className="p-8 shadow-card gradient-card">
+      {/* Pinterest Connection */}
+      <div className="mb-6 pb-6 border-b border-border">
+        <PinterestConnector
+          isConnected={isPinterestConnected}
+          isLoading={isPinterestLoading}
+          onConnectWithToken={onPinterestConnectWithToken}
+          onDisconnect={onPinterestDisconnect}
+        />
+      </div>
+
       <div className="text-center mb-8">
         <div className="w-16 h-16 rounded-2xl gradient-primary flex items-center justify-center mx-auto mb-4 shadow-glow">
           <Link className="w-8 h-8 text-primary-foreground" />

@@ -7,9 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Copy, RefreshCw, Home, Check, Download, ChevronLeft, ChevronRight, ExternalLink, DollarSign, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
-import { usePinterestAuth } from '@/hooks/usePinterestAuth';
-import { PinterestModeToggle, PublishMode } from '../PinterestModeToggle';
 import type { GeneratedResult, ProductData, GenerationSettings } from '../PinGenTool';
+import type { PinterestBoard } from '@/hooks/usePinterestAuth';
 
 // Pinterest SVG icon
 const PinterestIcon = () => (
@@ -25,9 +24,26 @@ interface ResultStepProps {
   onRegenerate: () => void;
   onReset: () => void;
   onUpdateResult: (result: GeneratedResult) => void;
+  isPinterestConnected: boolean;
+  pinterestBoards: PinterestBoard[];
+  isLoadingBoards: boolean;
+  onFetchBoards: () => void;
+  onCreatePin: (params: { boardId: string; title: string; description: string; link?: string; imageBase64: string }) => Promise<any>;
 }
 
-export const ResultStep = ({ result, productData, settings, onRegenerate, onReset, onUpdateResult }: ResultStepProps) => {
+export const ResultStep = ({ 
+  result, 
+  productData, 
+  settings, 
+  onRegenerate, 
+  onReset, 
+  onUpdateResult,
+  isPinterestConnected,
+  pinterestBoards,
+  isLoadingBoards,
+  onFetchBoards,
+  onCreatePin,
+}: ResultStepProps) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copiedTitle, setCopiedTitle] = useState(false);
   const [copiedDesc, setCopiedDesc] = useState(false);
@@ -37,18 +53,16 @@ export const ResultStep = ({ result, productData, settings, onRegenerate, onRese
   const [isRegeneratingDesc, setIsRegeneratingDesc] = useState(false);
   const [selectedBoardId, setSelectedBoardId] = useState<string>('');
   const [isPublishing, setIsPublishing] = useState(false);
-  const [publishMode, setPublishMode] = useState<PublishMode>('manual');
 
-  const pinterest = usePinterestAuth();
   const currentImage = result.images[currentImageIndex];
   const hasMultipleImages = result.images.length > 1;
 
-  // Fetch boards when in Pinterest mode
+  // Fetch boards when connected and no boards loaded
   useEffect(() => {
-    if (publishMode === 'pinterest' && pinterest.isConnected && pinterest.boards.length === 0) {
-      pinterest.fetchBoards();
+    if (isPinterestConnected && pinterestBoards.length === 0) {
+      onFetchBoards();
     }
-  }, [publishMode, pinterest.isConnected]);
+  }, [isPinterestConnected, pinterestBoards.length, onFetchBoards]);
 
   const handleCopy = async (text: string, type: 'title' | 'desc' | 'link') => {
     await navigator.clipboard.writeText(text);
@@ -85,7 +99,7 @@ export const ResultStep = ({ result, productData, settings, onRegenerate, onRese
         fullDescription += `\n\n🛒 Compre aqui: ${productData.affiliateLink}`;
       }
 
-      const pin = await pinterest.createPin({
+      const pin = await onCreatePin({
         boardId: selectedBoardId,
         title: result.title,
         description: fullDescription,
@@ -287,34 +301,21 @@ export const ResultStep = ({ result, productData, settings, onRegenerate, onRese
           </div>
         )}
 
-        {/* Publish Mode Toggle */}
-        <div className="mb-4">
-          <PinterestModeToggle
-            mode={publishMode}
-            onModeChange={setPublishMode}
-            isConnected={pinterest.isConnected}
-            isLoading={pinterest.isLoading}
-            onConnect={pinterest.connect}
-            onConnectWithToken={pinterest.connectWithToken}
-            onDisconnect={pinterest.disconnect}
-          />
-        </div>
-
-        {/* Pinterest Mode: Board Selection & Publish */}
-        {publishMode === 'pinterest' && pinterest.isConnected && (
+        {/* Pinterest API: Board Selection & Publish (only if connected) */}
+        {isPinterestConnected && (
           <div className="mb-4 p-4 rounded-lg bg-[#E60023]/5 border border-[#E60023]/20">
             <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
               <PinterestIcon />
-              Publicar no Pinterest
+              Publicar Automático no Pinterest
             </h4>
             
             <div className="space-y-3">
               <Select value={selectedBoardId} onValueChange={setSelectedBoardId}>
                 <SelectTrigger>
-                  <SelectValue placeholder={pinterest.isLoadingBoards ? "Carregando boards..." : "Selecione um board"} />
+                  <SelectValue placeholder={isLoadingBoards ? "Carregando boards..." : "Selecione um board"} />
                 </SelectTrigger>
                 <SelectContent>
-                  {pinterest.boards.map((board) => (
+                  {pinterestBoards.map((board) => (
                     <SelectItem key={board.id} value={board.id}>
                       {board.name}
                     </SelectItem>
@@ -326,7 +327,7 @@ export const ResultStep = ({ result, productData, settings, onRegenerate, onRese
                 variant="pinterest"
                 className="w-full gap-2"
                 onClick={handlePublishToPinterest}
-                disabled={isPublishing || !selectedBoardId || pinterest.isLoadingBoards}
+                disabled={isPublishing || !selectedBoardId || isLoadingBoards}
               >
                 {isPublishing ? (
                   <>
@@ -336,7 +337,7 @@ export const ResultStep = ({ result, productData, settings, onRegenerate, onRese
                 ) : (
                   <>
                     <PinterestIcon />
-                    Publicar Pin
+                    Publicar Pin Automático
                   </>
                 )}
               </Button>
@@ -346,12 +347,10 @@ export const ResultStep = ({ result, productData, settings, onRegenerate, onRese
 
         {/* Action Buttons */}
         <div className="flex gap-2 md:gap-3 justify-center flex-wrap">
-          {publishMode === 'manual' && (
-            <Button variant="pinterest" size="default" onClick={handleSharePinterest} className="gap-2">
-              <PinterestIcon />
-              <span className="hidden sm:inline">Publicar</span>
-            </Button>
-          )}
+          <Button variant="pinterest" size="default" onClick={handleSharePinterest} className="gap-2">
+            <PinterestIcon />
+            <span className="hidden sm:inline">Publicar Manual</span>
+          </Button>
           <Button variant="secondary" size="default" onClick={() => handleDownload(currentImage.image, currentImageIndex)}>
             <Download className="w-4 h-4" />
             <span className="hidden sm:inline ml-2">Baixar</span>

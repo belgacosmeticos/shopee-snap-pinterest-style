@@ -8,7 +8,7 @@ interface PinterestTokens {
   expiresAt: number;
 }
 
-interface PinterestBoard {
+export interface PinterestBoard {
   id: string;
   name: string;
   description?: string;
