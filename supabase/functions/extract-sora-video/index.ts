@@ -16,18 +16,126 @@ interface SoraVideoInfo {
   hasWatermark: boolean;
   success: boolean;
   error?: string;
+  method?: string;
 }
 
-// Try Firecrawl for JavaScript-rendered pages
+// ============= LAYER 1: CDN Direto (dyysy.com) =============
+// Baseado no SoraPure - CDN alternativo gratuito
+async function tryCdnDirect(videoId: string): Promise<string | null> {
+  const cdnUrls = [
+    `https://oscdn2.dyysy.com/MP4/${videoId}.mp4`,
+    `https://oscdn.dyysy.com/MP4/${videoId}.mp4`,
+  ];
+
+  for (const cdnUrl of cdnUrls) {
+    try {
+      console.log('[extract-sora-video] LAYER 1 - Trying CDN direct:', cdnUrl);
+      
+      const response = await fetch(cdnUrl, {
+        method: 'HEAD',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+      });
+
+      if (response.ok) {
+        const contentType = response.headers.get('content-type');
+        const contentLength = response.headers.get('content-length');
+        
+        console.log('[extract-sora-video] CDN direct success:', cdnUrl, 'size:', contentLength);
+        
+        // Verify it's actually a video
+        if (contentType?.includes('video') || (contentLength && parseInt(contentLength) > 100000)) {
+          return cdnUrl;
+        }
+      }
+    } catch (error) {
+      console.log('[extract-sora-video] CDN direct failed:', cdnUrl, error);
+    }
+  }
+
+  return null;
+}
+
+// ============= LAYER 2: CDN Proxy (workers.dev) =============
+// Proxy do SoraPure via Cloudflare Workers
+async function tryCdnProxy(videoId: string, originalUrl: string): Promise<string | null> {
+  const proxyUrls = [
+    `https://api.soracdn.workers.dev/download-proxy?url=${encodeURIComponent(originalUrl)}`,
+    `https://api.soracdn.workers.dev/video/${videoId}`,
+  ];
+
+  for (const proxyUrl of proxyUrls) {
+    try {
+      console.log('[extract-sora-video] LAYER 2 - Trying CDN proxy:', proxyUrl);
+      
+      const response = await fetch(proxyUrl, {
+        method: 'HEAD',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+      });
+
+      if (response.ok) {
+        const contentType = response.headers.get('content-type');
+        const contentLength = response.headers.get('content-length');
+        
+        console.log('[extract-sora-video] CDN proxy success:', proxyUrl);
+        
+        if (contentType?.includes('video') || (contentLength && parseInt(contentLength) > 100000)) {
+          return proxyUrl;
+        }
+      }
+    } catch (error) {
+      console.log('[extract-sora-video] CDN proxy failed:', proxyUrl, error);
+    }
+  }
+
+  return null;
+}
+
+// ============= LAYER 3: OpenAI CDN =============
+// CDN oficial da OpenAI (pode ter watermark)
+async function tryOpenAiCdn(videoId: string): Promise<string | null> {
+  const openAiUrls = [
+    `https://cdn.openai.com/sora/videos/${videoId}.mp4`,
+    `https://cdn.openai.com/MP4/${videoId}.mp4`,
+    `https://videos.openai.com/${videoId}.mp4`,
+  ];
+
+  for (const cdnUrl of openAiUrls) {
+    try {
+      console.log('[extract-sora-video] LAYER 3 - Trying OpenAI CDN:', cdnUrl);
+      
+      const response = await fetch(cdnUrl, {
+        method: 'HEAD',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+      });
+
+      if (response.ok) {
+        console.log('[extract-sora-video] OpenAI CDN success:', cdnUrl);
+        return cdnUrl;
+      }
+    } catch (error) {
+      console.log('[extract-sora-video] OpenAI CDN failed:', cdnUrl, error);
+    }
+  }
+
+  return null;
+}
+
+// ============= LAYER 4: Firecrawl (último recurso) =============
 async function tryFirecrawl(url: string): Promise<SoraVideoInfo | null> {
   const apiKey = Deno.env.get('FIRECRAWL_API_KEY');
   if (!apiKey) {
-    console.log('[extract-sora-video] Firecrawl API key not found');
+    console.log('[extract-sora-video] LAYER 4 - Firecrawl API key not found');
     return null;
   }
 
   try {
-    console.log('[extract-sora-video] Trying Firecrawl for:', url);
+    console.log('[extract-sora-video] LAYER 4 - Trying Firecrawl for:', url);
     
     const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
       method: 'POST',
@@ -58,10 +166,43 @@ async function tryFirecrawl(url: string): Promise<SoraVideoInfo | null> {
   }
 }
 
-// Direct fetch extraction
+// ============= Extração de Video ID =============
+function extractVideoId(url: string): string | null {
+  // Padrões de URL do Sora:
+  // https://sora.chatgpt.com/p/s_abc123
+  // https://sora.chatgpt.com/video/s_abc123
+  // https://sora.com/p/s_abc123
+  
+  const patterns = [
+    /\/p\/(s_[a-zA-Z0-9_-]+)/i,
+    /\/video\/(s_[a-zA-Z0-9_-]+)/i,
+    /\/(s_[a-zA-Z0-9_-]+)(?:\/|$)/i,
+    /[?&]id=(s_[a-zA-Z0-9_-]+)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match && match[1]) {
+      console.log('[extract-sora-video] Extracted video ID:', match[1]);
+      return match[1];
+    }
+  }
+
+  // Tentar extrair qualquer ID que pareça ser um ID de vídeo
+  const genericMatch = url.match(/([a-zA-Z0-9_-]{10,})/);
+  if (genericMatch) {
+    console.log('[extract-sora-video] Extracted generic ID:', genericMatch[1]);
+    return genericMatch[1];
+  }
+
+  console.log('[extract-sora-video] Could not extract video ID from:', url);
+  return null;
+}
+
+// Direct fetch extraction (backup)
 async function tryDirectFetch(url: string): Promise<SoraVideoInfo | null> {
   try {
-    console.log('[extract-sora-video] Trying direct fetch for:', url);
+    console.log('[extract-sora-video] LAYER 5 - Trying direct fetch for:', url);
     
     const response = await fetch(url, {
       headers: {
@@ -98,6 +239,7 @@ function extractFromHtml(html: string, originalUrl: string): SoraVideoInfo | nul
     originalUrl: originalUrl,
     hasWatermark: true,
     success: false,
+    method: 'html-scraping',
   };
 
   // Video URL patterns
@@ -199,14 +341,12 @@ function extractFromHtml(html: string, originalUrl: string): SoraVideoInfo | nul
 
 function decodeUnicode(str: string): string {
   return str
-    // HTML entities first
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
-    // Unicode escapes
     .replace(/\\u002F/g, '/')
     .replace(/\\u0026/g, '&')
     .replace(/\\u003C/g, '<')
@@ -217,20 +357,87 @@ function decodeUnicode(str: string): string {
     .replace(/\\/g, '');
 }
 
+// ============= Main Extraction Function =============
 async function extractSoraVideo(url: string): Promise<SoraVideoInfo> {
   console.log('[extract-sora-video] Processing URL:', url);
   
-  // Try Firecrawl first (best for JS-rendered pages)
+  // Extrair o video ID do URL
+  const videoId = extractVideoId(url);
+  
+  if (videoId) {
+    // ============= LAYER 1: CDN Direto (dyysy.com) - GRÁTIS =============
+    console.log('[extract-sora-video] ========== LAYER 1: CDN Direct ==========');
+    const cdnDirectUrl = await tryCdnDirect(videoId);
+    if (cdnDirectUrl) {
+      console.log('[extract-sora-video] SUCCESS via LAYER 1 (CDN Direct - FREE)');
+      return {
+        videoUrl: cdnDirectUrl,
+        videoUrlNoWatermark: cdnDirectUrl,
+        title: `Sora Video - ${videoId}`,
+        prompt: null,
+        thumbnailUrl: null,
+        creator: null,
+        originalUrl: url,
+        hasWatermark: false,
+        success: true,
+        method: 'cdn-direct-dyysy',
+      };
+    }
+
+    // ============= LAYER 2: CDN Proxy (workers.dev) - GRÁTIS =============
+    console.log('[extract-sora-video] ========== LAYER 2: CDN Proxy ==========');
+    const cdnProxyUrl = await tryCdnProxy(videoId, url);
+    if (cdnProxyUrl) {
+      console.log('[extract-sora-video] SUCCESS via LAYER 2 (CDN Proxy - FREE)');
+      return {
+        videoUrl: cdnProxyUrl,
+        videoUrlNoWatermark: cdnProxyUrl,
+        title: `Sora Video - ${videoId}`,
+        prompt: null,
+        thumbnailUrl: null,
+        creator: null,
+        originalUrl: url,
+        hasWatermark: false,
+        success: true,
+        method: 'cdn-proxy-workers',
+      };
+    }
+
+    // ============= LAYER 3: OpenAI CDN - GRÁTIS (pode ter watermark) =============
+    console.log('[extract-sora-video] ========== LAYER 3: OpenAI CDN ==========');
+    const openAiCdnUrl = await tryOpenAiCdn(videoId);
+    if (openAiCdnUrl) {
+      console.log('[extract-sora-video] SUCCESS via LAYER 3 (OpenAI CDN - FREE)');
+      return {
+        videoUrl: openAiCdnUrl,
+        videoUrlNoWatermark: openAiCdnUrl,
+        title: `Sora Video - ${videoId}`,
+        prompt: null,
+        thumbnailUrl: null,
+        creator: null,
+        originalUrl: url,
+        hasWatermark: true, // OpenAI CDN pode ter watermark
+        success: true,
+        method: 'cdn-openai',
+      };
+    }
+  }
+  
+  // ============= LAYER 4: Firecrawl (pago) =============
+  console.log('[extract-sora-video] ========== LAYER 4: Firecrawl ==========');
   const firecrawlResult = await tryFirecrawl(url);
   if (firecrawlResult && firecrawlResult.videoUrl) {
-    console.log('[extract-sora-video] Success via Firecrawl');
+    console.log('[extract-sora-video] SUCCESS via LAYER 4 (Firecrawl - PAID)');
+    firecrawlResult.method = 'firecrawl';
     return firecrawlResult;
   }
   
-  // Fallback to direct fetch
+  // ============= LAYER 5: Direct Fetch (último recurso) =============
+  console.log('[extract-sora-video] ========== LAYER 5: Direct Fetch ==========');
   const directResult = await tryDirectFetch(url);
   if (directResult && directResult.videoUrl) {
-    console.log('[extract-sora-video] Success via direct fetch');
+    console.log('[extract-sora-video] SUCCESS via LAYER 5 (Direct Fetch)');
+    directResult.method = 'direct-fetch';
     return directResult;
   }
   
@@ -261,7 +468,6 @@ serve(async (req) => {
     if (action === 'download' && videoUrl) {
       console.log('[extract-sora-video] Download proxy for:', videoUrl);
       
-      // Decode URL in case it has HTML entities
       const cleanUrl = decodeUnicode(videoUrl);
       
       const videoResponse = await fetch(cleanUrl, {
