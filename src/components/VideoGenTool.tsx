@@ -13,6 +13,7 @@ export interface VideoProductData {
 export interface ExtractedVideo {
   videoUrl: string | null;
   title: string | null;
+  description: string | null;
   creator: string | null;
   thumbnailUrl: string | null;
   originalUrl: string;

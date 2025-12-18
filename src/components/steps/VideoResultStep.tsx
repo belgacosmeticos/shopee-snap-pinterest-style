@@ -41,10 +41,12 @@ export const VideoResultStep = ({
   const [rewritingCaptions, setRewritingCaptions] = useState<Record<number, boolean>>({});
   const [copiedCaptions, setCopiedCaptions] = useState<Record<number, boolean>>({});
   const [videoCaptions, setVideoCaptions] = useState<Record<number, string>>(() => {
-    // Initialize with original video titles/descriptions as captions
+    // Initialize with original video description/title as captions
     const initial: Record<number, string> = {};
     videos.forEach((video, index) => {
-      initial[index] = video.title || `${productData.title} ✨ Link na bio! #shopee #afiliado`;
+      // Prefer description (full caption), then title, then fallback
+      const caption = video.description || video.title || `${productData.title} ✨ Link na bio! #shopee #afiliado`;
+      initial[index] = caption;
     });
     return initial;
   });
@@ -123,28 +125,51 @@ export const VideoResultStep = ({
     }
   };
 
-  const handleDownloadVideo = async (videoUrl: string | null, originalUrl: string) => {
+  const [downloadingVideo, setDownloadingVideo] = useState<Record<number, boolean>>({});
+
+  const handleDownloadVideo = async (videoUrl: string | null, originalUrl: string, index: number) => {
+    setDownloadingVideo(prev => ({ ...prev, [index]: true }));
+    
     if (videoUrl) {
       try {
-        const response = await fetch(videoUrl);
+        toast.info('Baixando vídeo...');
+        const response = await fetch(videoUrl, { mode: 'cors' });
+        
+        if (!response.ok) {
+          throw new Error('Falha ao baixar');
+        }
+        
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `video-${Date.now()}.mp4`;
+        a.download = `video-shopee-${Date.now()}.mp4`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        toast.success('Vídeo baixado!');
-      } catch {
+        toast.success('Vídeo baixado com sucesso!');
+      } catch (err) {
+        console.error('[VideoResultStep] Download error:', err);
+        // Fallback: open in new tab
         window.open(videoUrl, '_blank');
-        toast.info('Abrindo vídeo em nova aba');
+        toast.info('Abrindo vídeo em nova aba - clique com botão direito e "Salvar como"');
       }
     } else {
+      // No direct video URL - open original and show instructions
       window.open(originalUrl, '_blank');
-      toast.info('Abrindo link original - baixe manualmente');
+      toast.info('Abra o app Shopee, toque em "Abrir Link" e baixe pelo app', {
+        duration: 5000,
+      });
     }
+    
+    setDownloadingVideo(prev => ({ ...prev, [index]: false }));
+  };
+
+  const handleCopyVideoLink = async (videoUrl: string | null, originalUrl: string) => {
+    const urlToCopy = videoUrl || originalUrl;
+    await navigator.clipboard.writeText(urlToCopy);
+    toast.success('Link do vídeo copiado!');
   };
 
   const handleSharePinterest = () => {
@@ -276,16 +301,33 @@ export const VideoResultStep = ({
                     </p>
                   )}
                   
-                  {/* Download Button */}
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={() => handleDownloadVideo(video.videoUrl, video.originalUrl)}
-                    className="gap-2 gradient-primary"
-                  >
-                    <Download className="w-4 h-4" />
-                    {video.videoUrl ? 'Baixar MP4' : 'Abrir Link'}
-                  </Button>
+                  {/* Download Buttons */}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => handleDownloadVideo(video.videoUrl, video.originalUrl, index)}
+                      disabled={downloadingVideo[index]}
+                      className="gap-2 gradient-primary"
+                    >
+                      {downloadingVideo[index] ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Download className="w-4 h-4" />
+                      )}
+                      {video.videoUrl ? 'Baixar MP4' : 'Abrir no App'}
+                    </Button>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleCopyVideoLink(video.videoUrl, video.originalUrl)}
+                      className="gap-2"
+                    >
+                      <Copy className="w-4 h-4" />
+                      Copiar Link
+                    </Button>
+                  </div>
                 </div>
               </div>
 

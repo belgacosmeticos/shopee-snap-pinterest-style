@@ -99,6 +99,7 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
             extractedVideos.push({
               videoUrl: null,
               title: null,
+              description: null,
               creator: null,
               thumbnailUrl: null,
               originalUrl: videoUrl,
@@ -107,6 +108,7 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
             extractedVideos.push({
               videoUrl: videoData?.videoUrl || null,
               title: videoData?.title || null,
+              description: videoData?.description || null,
               creator: videoData?.creator || null,
               thumbnailUrl: videoData?.thumbnailUrl || null,
               originalUrl: videoData?.originalUrl || videoUrl,
@@ -117,6 +119,7 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
           extractedVideos.push({
             videoUrl: null,
             title: null,
+            description: null,
             creator: null,
             thumbnailUrl: null,
             originalUrl: videoUrl,
