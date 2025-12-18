@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PinGenTool } from './PinGenTool';
 import { VideoGenTool } from './VideoGenTool';
-import { ImageIcon, Video } from 'lucide-react';
+import { SoraGenTool } from './SoraGenTool';
+import { ImageIcon, Video, Sparkles } from 'lucide-react';
 
 export const ToolsDashboard = () => {
   const [activeTab, setActiveTab] = useState('pingen');
@@ -13,23 +14,30 @@ export const ToolsDashboard = () => {
         {/* Dashboard Header */}
         <header className="text-center mb-6 animate-slide-up">
           <h1 className="text-3xl md:text-4xl font-display font-bold mb-2">
-            <span className="text-gradient">Shopee Tools</span>
+            <span className="text-gradient">Content Tools</span>
           </h1>
           <p className="text-muted-foreground">
-            Ferramentas para criadores de conteúdo afiliados
+            Ferramentas para criadores de conteúdo
           </p>
         </header>
 
         {/* Tool Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full max-w-md mx-auto grid-cols-2 mb-6 h-12">
-            <TabsTrigger value="pingen" className="gap-2 text-sm md:text-base">
+          <TabsList className="grid w-full max-w-lg mx-auto grid-cols-3 mb-6 h-12">
+            <TabsTrigger value="pingen" className="gap-2 text-xs md:text-sm">
               <ImageIcon className="w-4 h-4" />
-              PinGen
+              <span className="hidden sm:inline">PinGen</span>
+              <span className="sm:hidden">Pin</span>
             </TabsTrigger>
-            <TabsTrigger value="videogen" className="gap-2 text-sm md:text-base">
+            <TabsTrigger value="videogen" className="gap-2 text-xs md:text-sm">
               <Video className="w-4 h-4" />
-              VideoGen
+              <span className="hidden sm:inline">VideoGen</span>
+              <span className="sm:hidden">Video</span>
+            </TabsTrigger>
+            <TabsTrigger value="soragen" className="gap-2 text-xs md:text-sm">
+              <Sparkles className="w-4 h-4" />
+              <span className="hidden sm:inline">SoraGen</span>
+              <span className="sm:hidden">Sora</span>
             </TabsTrigger>
           </TabsList>
 
@@ -39,6 +47,10 @@ export const ToolsDashboard = () => {
 
           <TabsContent value="videogen" className="mt-0 animate-fade-in">
             <VideoGenTool />
+          </TabsContent>
+
+          <TabsContent value="soragen" className="mt-0 animate-fade-in">
+            <SoraGenTool />
           </TabsContent>
         </Tabs>
       </div>
