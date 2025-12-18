@@ -19,7 +19,64 @@ interface SoraVideoInfo {
   method?: string;
 }
 
-// ============= LAYER 1: CDN Direto (dyysy.com) =============
+// ============= LAYER 1: API sora2dl.com (REMOVE WATERMARK!) =============
+// Usa a API pública do sora2dl.com que processa com FFmpeg
+async function trySora2dlApi(soraUrl: string): Promise<{url: string, hasWatermark: boolean} | null> {
+  try {
+    console.log('[extract-sora-video] LAYER 1 - Trying sora2dl.com API');
+    
+    const response = await fetch('https://sora2dl.com/download', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Origin': 'https://sora2dl.com',
+        'Referer': 'https://sora2dl.com/',
+      },
+      body: JSON.stringify({ url: soraUrl }),
+    });
+
+    console.log('[extract-sora-video] sora2dl.com response status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.log('[extract-sora-video] sora2dl.com error response:', errorText);
+      return null;
+    }
+
+    const data = await response.json();
+    console.log('[extract-sora-video] sora2dl.com response:', JSON.stringify(data).substring(0, 500));
+    
+    // A API pode retornar diferentes formatos
+    // Verificar se tem URL limpa (sem watermark)
+    if (data.cleanUrl || data.url || data.videoUrl || data.download_url) {
+      const videoUrl = data.cleanUrl || data.url || data.videoUrl || data.download_url;
+      console.log('[extract-sora-video] sora2dl.com success! Video URL found');
+      return { 
+        url: videoUrl,
+        hasWatermark: false // sora2dl remove watermark com FFmpeg
+      };
+    }
+    
+    // Se a resposta for base64
+    if (data.base64 || (typeof data === 'string' && data.startsWith('data:'))) {
+      console.log('[extract-sora-video] sora2dl.com returned base64 video');
+      return {
+        url: data.base64 || data,
+        hasWatermark: false
+      };
+    }
+    
+    console.log('[extract-sora-video] sora2dl.com: no video URL in response');
+    return null;
+  } catch (error) {
+    console.log('[extract-sora-video] sora2dl.com API failed:', error);
+    return null;
+  }
+}
+
+// ============= LAYER 2: CDN Direto (dyysy.com) =============
 // Baseado no SoraPure - CDN alternativo gratuito
 async function tryCdnDirect(videoId: string): Promise<string | null> {
   const cdnUrls = [
@@ -29,7 +86,7 @@ async function tryCdnDirect(videoId: string): Promise<string | null> {
 
   for (const cdnUrl of cdnUrls) {
     try {
-      console.log('[extract-sora-video] LAYER 1 - Trying CDN direct:', cdnUrl);
+      console.log('[extract-sora-video] LAYER 2 - Trying CDN direct:', cdnUrl);
       
       const response = await fetch(cdnUrl, {
         method: 'HEAD',
@@ -57,13 +114,13 @@ async function tryCdnDirect(videoId: string): Promise<string | null> {
   return null;
 }
 
-// ============= LAYER 2: SoraSave Proxy (REMOVE WATERMARK!) =============
+// ============= LAYER 3: SoraSave Proxy (REMOVE WATERMARK!) =============
 // Baseado no sora2dl - Este proxy remove a watermark automaticamente
 async function trySoraSaveProxy(cdnUrl: string): Promise<string | null> {
   try {
     // SoraSave proxy que remove watermark
     const proxyUrl = `https://sorasave.site/sora/download.php?url=${encodeURIComponent(cdnUrl)}`;
-    console.log('[extract-sora-video] LAYER 2 - Trying SoraSave proxy:', proxyUrl);
+    console.log('[extract-sora-video] LAYER 3 - Trying SoraSave proxy:', proxyUrl);
     
     const response = await fetch(proxyUrl, {
       method: 'HEAD',
@@ -93,7 +150,7 @@ async function trySoraSaveProxy(cdnUrl: string): Promise<string | null> {
   return null;
 }
 
-// ============= LAYER 3: CDN Proxy (workers.dev) =============
+// ============= LAYER 4: CDN Proxy (workers.dev) =============
 // Proxy do SoraPure via Cloudflare Workers
 async function tryCdnProxy(videoId: string, originalUrl: string): Promise<string | null> {
   const proxyUrls = [
@@ -103,7 +160,7 @@ async function tryCdnProxy(videoId: string, originalUrl: string): Promise<string
 
   for (const proxyUrl of proxyUrls) {
     try {
-      console.log('[extract-sora-video] LAYER 3 - Trying CDN proxy:', proxyUrl);
+      console.log('[extract-sora-video] LAYER 4 - Trying CDN proxy:', proxyUrl);
       
       const response = await fetch(proxyUrl, {
         method: 'HEAD',
@@ -130,7 +187,7 @@ async function tryCdnProxy(videoId: string, originalUrl: string): Promise<string
   return null;
 }
 
-// ============= LAYER 4: OpenAI CDN =============
+// ============= LAYER 5: OpenAI CDN =============
 // CDN oficial da OpenAI (pode ter watermark)
 async function tryOpenAiCdn(videoId: string): Promise<string | null> {
   const openAiUrls = [
@@ -141,7 +198,7 @@ async function tryOpenAiCdn(videoId: string): Promise<string | null> {
 
   for (const cdnUrl of openAiUrls) {
     try {
-      console.log('[extract-sora-video] LAYER 4 - Trying OpenAI CDN:', cdnUrl);
+      console.log('[extract-sora-video] LAYER 5 - Trying OpenAI CDN:', cdnUrl);
       
       const response = await fetch(cdnUrl, {
         method: 'HEAD',
@@ -162,16 +219,16 @@ async function tryOpenAiCdn(videoId: string): Promise<string | null> {
   return null;
 }
 
-// ============= LAYER 5: Firecrawl (último recurso) =============
+// ============= LAYER 6: Firecrawl (último recurso) =============
 async function tryFirecrawl(url: string): Promise<SoraVideoInfo | null> {
   const apiKey = Deno.env.get('FIRECRAWL_API_KEY');
   if (!apiKey) {
-    console.log('[extract-sora-video] LAYER 5 - Firecrawl API key not found');
+    console.log('[extract-sora-video] LAYER 6 - Firecrawl API key not found');
     return null;
   }
 
   try {
-    console.log('[extract-sora-video] LAYER 5 - Trying Firecrawl for:', url);
+    console.log('[extract-sora-video] LAYER 6 - Trying Firecrawl for:', url);
     
     const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
       method: 'POST',
@@ -235,10 +292,10 @@ function extractVideoId(url: string): string | null {
   return null;
 }
 
-// Direct fetch extraction (backup)
+// ============= LAYER 7: Direct Fetch (backup) =============
 async function tryDirectFetch(url: string): Promise<SoraVideoInfo | null> {
   try {
-    console.log('[extract-sora-video] LAYER 6 - Trying direct fetch for:', url);
+    console.log('[extract-sora-video] LAYER 7 - Trying direct fetch for:', url);
     
     const response = await fetch(url, {
       headers: {
@@ -400,18 +457,38 @@ async function extractSoraVideo(url: string): Promise<SoraVideoInfo> {
   // Extrair o video ID do URL
   const videoId = extractVideoId(url);
   
+  // ============= LAYER 1: API sora2dl.com (GRÁTIS + SEM WATERMARK!) =============
+  console.log('[extract-sora-video] ========== LAYER 1: sora2dl.com API ==========');
+  const sora2dlResult = await trySora2dlApi(url);
+  
+  if (sora2dlResult) {
+    console.log('[extract-sora-video] SUCCESS via LAYER 1 (sora2dl.com - NO WATERMARK!)');
+    return {
+      videoUrl: sora2dlResult.url,
+      videoUrlNoWatermark: sora2dlResult.url,
+      title: videoId ? `Sora Video - ${videoId}` : 'Sora Video',
+      prompt: null,
+      thumbnailUrl: null,
+      creator: null,
+      originalUrl: url,
+      hasWatermark: sora2dlResult.hasWatermark,
+      success: true,
+      method: 'sora2dl-api',
+    };
+  }
+  
   if (videoId) {
-    // ============= LAYER 1: CDN Direto (dyysy.com) - GRÁTIS =============
-    console.log('[extract-sora-video] ========== LAYER 1: CDN Direct ==========');
+    // ============= LAYER 2: CDN Direto (dyysy.com) - GRÁTIS =============
+    console.log('[extract-sora-video] ========== LAYER 2: CDN Direct ==========');
     const cdnDirectUrl = await tryCdnDirect(videoId);
     
     if (cdnDirectUrl) {
-      // ============= LAYER 2: SoraSave Proxy (REMOVE WATERMARK!) =============
-      console.log('[extract-sora-video] ========== LAYER 2: SoraSave Proxy ==========');
+      // ============= LAYER 3: SoraSave Proxy (REMOVE WATERMARK!) =============
+      console.log('[extract-sora-video] ========== LAYER 3: SoraSave Proxy ==========');
       const soraSaveUrl = await trySoraSaveProxy(cdnDirectUrl);
       
       if (soraSaveUrl) {
-        console.log('[extract-sora-video] SUCCESS via LAYER 2 (SoraSave Proxy - NO WATERMARK!)');
+        console.log('[extract-sora-video] SUCCESS via LAYER 3 (SoraSave Proxy - NO WATERMARK!)');
         return {
           videoUrl: soraSaveUrl,
           videoUrlNoWatermark: soraSaveUrl,
@@ -442,11 +519,11 @@ async function extractSoraVideo(url: string): Promise<SoraVideoInfo> {
       };
     }
 
-    // ============= LAYER 3: CDN Proxy (workers.dev) - GRÁTIS =============
-    console.log('[extract-sora-video] ========== LAYER 3: CDN Proxy ==========');
+    // ============= LAYER 4: CDN Proxy (workers.dev) - GRÁTIS =============
+    console.log('[extract-sora-video] ========== LAYER 4: CDN Proxy ==========');
     const cdnProxyUrl = await tryCdnProxy(videoId, url);
     if (cdnProxyUrl) {
-      console.log('[extract-sora-video] SUCCESS via LAYER 3 (CDN Proxy - FREE)');
+      console.log('[extract-sora-video] SUCCESS via LAYER 4 (CDN Proxy - FREE)');
       return {
         videoUrl: cdnProxyUrl,
         videoUrlNoWatermark: cdnProxyUrl,
@@ -461,11 +538,11 @@ async function extractSoraVideo(url: string): Promise<SoraVideoInfo> {
       };
     }
 
-    // ============= LAYER 4: OpenAI CDN - GRÁTIS (pode ter watermark) =============
-    console.log('[extract-sora-video] ========== LAYER 4: OpenAI CDN ==========');
+    // ============= LAYER 5: OpenAI CDN - GRÁTIS (pode ter watermark) =============
+    console.log('[extract-sora-video] ========== LAYER 5: OpenAI CDN ==========');
     const openAiCdnUrl = await tryOpenAiCdn(videoId);
     if (openAiCdnUrl) {
-      console.log('[extract-sora-video] SUCCESS via LAYER 4 (OpenAI CDN - FREE)');
+      console.log('[extract-sora-video] SUCCESS via LAYER 5 (OpenAI CDN - FREE)');
       return {
         videoUrl: openAiCdnUrl,
         videoUrlNoWatermark: openAiCdnUrl,
@@ -481,20 +558,20 @@ async function extractSoraVideo(url: string): Promise<SoraVideoInfo> {
     }
   }
   
-  // ============= LAYER 5: Firecrawl (pago) =============
-  console.log('[extract-sora-video] ========== LAYER 5: Firecrawl ==========');
+  // ============= LAYER 6: Firecrawl (pago) =============
+  console.log('[extract-sora-video] ========== LAYER 6: Firecrawl ==========');
   const firecrawlResult = await tryFirecrawl(url);
   if (firecrawlResult && firecrawlResult.videoUrl) {
-    console.log('[extract-sora-video] SUCCESS via LAYER 5 (Firecrawl - PAID)');
+    console.log('[extract-sora-video] SUCCESS via LAYER 6 (Firecrawl - PAID)');
     firecrawlResult.method = 'firecrawl';
     return firecrawlResult;
   }
   
-  // ============= LAYER 6: Direct Fetch (último recurso) =============
-  console.log('[extract-sora-video] ========== LAYER 6: Direct Fetch ==========');
+  // ============= LAYER 7: Direct Fetch (último recurso) =============
+  console.log('[extract-sora-video] ========== LAYER 7: Direct Fetch ==========');
   const directResult = await tryDirectFetch(url);
   if (directResult && directResult.videoUrl) {
-    console.log('[extract-sora-video] SUCCESS via LAYER 6 (Direct Fetch)');
+    console.log('[extract-sora-video] SUCCESS via LAYER 7 (Direct Fetch)');
     directResult.method = 'direct-fetch';
     return directResult;
   }
