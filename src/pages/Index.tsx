@@ -1,14 +1,14 @@
-import { PinGenTool } from '@/components/PinGenTool';
+import { ToolsDashboard } from '@/components/ToolsDashboard';
 import { Helmet } from 'react-helmet-async';
 
 const Index = () => {
   return (
     <>
       <Helmet>
-        <title>PinGen - Gerador de Pins Virais para Pinterest | Afiliados Shopee</title>
-        <meta name="description" content="Transforme produtos da Shopee em imagens virais para o Pinterest. Ferramenta de geração de conteúdo para afiliados." />
+        <title>Shopee Tools - Gerador de Pins e Vídeos Virais | Afiliados</title>
+        <meta name="description" content="Ferramentas para criadores de conteúdo afiliados Shopee. Gere pins virais e extraia vídeos com legendas automáticas." />
       </Helmet>
-      <PinGenTool />
+      <ToolsDashboard />
     </>
   );
 };
