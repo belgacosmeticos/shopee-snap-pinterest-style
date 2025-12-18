@@ -31,8 +31,8 @@ export const SoraUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: SoraUrlI
     }
 
     // Validate Sora URL
-    if (!trimmedUrl.includes('sora.com') && !trimmedUrl.includes('openai.com')) {
-      toast.error('Por favor, insira uma URL válida do Sora (sora.com ou openai.com).');
+    if (!trimmedUrl.includes('sora.com') && !trimmedUrl.includes('openai.com') && !trimmedUrl.includes('chatgpt.com')) {
+      toast.error('Por favor, insira uma URL válida do Sora.');
       return;
     }
 
@@ -89,7 +89,7 @@ export const SoraUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: SoraUrlI
               <Link className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
                 type="url"
-                placeholder="https://sora.com/g/... ou https://openai.com/..."
+                placeholder="https://sora.chatgpt.com/p/s_..."
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 className="pl-10"
@@ -97,7 +97,7 @@ export const SoraUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: SoraUrlI
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              Exemplo: https://sora.com/g/gen_01234567890
+              Exemplo: https://sora.chatgpt.com/p/s_694309bcaa208191b60bfd2bee7f21c1
             </p>
           </div>
 
@@ -123,10 +123,9 @@ export const SoraUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: SoraUrlI
         <div className="mt-6 p-4 rounded-lg bg-muted/50">
           <h4 className="font-medium text-sm mb-2">💡 Dicas</h4>
           <ul className="text-xs text-muted-foreground space-y-1">
-            <li>• Vá até sora.com e encontre o vídeo que deseja baixar</li>
+            <li>• Vá até sora.chatgpt.com e encontre o vídeo que deseja baixar</li>
             <li>• Clique em "Share" e copie o link</li>
             <li>• Cole o link aqui e clique em "Extrair Vídeo"</li>
-            <li>• O vídeo pode conter a marca d'água "Made with Sora"</li>
           </ul>
         </div>
       </CardContent>
