@@ -468,9 +468,15 @@ async function extractVideoInfo(url: string): Promise<VideoInfo> {
   
   // Step 2: Check if it's a universal-link redirect page
   const redirUrl = extractRedirUrl(finalUrl);
+  let svShopeeUrl: string | null = null;
+  
   if (redirUrl) {
     console.log('[extract-shopee-video] Following redir to:', redirUrl);
     finalUrl = redirUrl;
+    // Save the sv.shopee URL for later use with Afianf
+    if (redirUrl.includes('sv.shopee') || redirUrl.includes('share-video')) {
+      svShopeeUrl = redirUrl;
+    }
   }
   
   // Step 3: Extract video from Shopee page (this gives us the watermarked version)
@@ -478,11 +484,16 @@ async function extractVideoInfo(url: string): Promise<VideoInfo> {
   
   if (finalUrl.includes('sv.shopee') || finalUrl.includes('share-video')) {
     result = await extractVideoFromShopeeVideo(finalUrl);
+    svShopeeUrl = finalUrl;
   } else {
     const secondRedirect = await followRedirects(finalUrl);
     if (secondRedirect !== finalUrl) {
       const redirUrl2 = extractRedirUrl(secondRedirect);
-      result = await extractVideoFromShopeeVideo(redirUrl2 || secondRedirect);
+      const targetUrl = redirUrl2 || secondRedirect;
+      result = await extractVideoFromShopeeVideo(targetUrl);
+      if (targetUrl.includes('sv.shopee') || targetUrl.includes('share-video')) {
+        svShopeeUrl = targetUrl;
+      }
     } else {
       result = await extractVideoFromShopeeVideo(finalUrl);
     }
@@ -491,36 +502,62 @@ async function extractVideoInfo(url: string): Promise<VideoInfo> {
   // ========== Try to get video WITHOUT watermark ==========
   console.log('[extract-shopee-video] === Starting watermark-free extraction ===');
   
+  // Build list of URLs to try with Afianf (prioritize sv.shopee URLs)
+  const urlsToTryAfianf: string[] = [];
+  
+  // If we have a short URL (shp.ee), try it first - Afianf handles these well
+  if (url.includes('shp.ee') || url.includes('s.shopee')) {
+    urlsToTryAfianf.push(url);
+  }
+  
+  // If we have a sv.shopee URL, try it (direct video page URL)
+  if (svShopeeUrl && !urlsToTryAfianf.includes(svShopeeUrl)) {
+    urlsToTryAfianf.push(svShopeeUrl);
+  }
+  
+  // Add original URL as fallback if not already included
+  if (!urlsToTryAfianf.includes(url)) {
+    urlsToTryAfianf.push(url);
+  }
+  
+  console.log('[extract-shopee-video] URLs to try with Afianf:', urlsToTryAfianf);
+  
   // LAYER 1: Firecrawl + Afianf (renderiza JavaScript - mais confiável)
-  const firecrawlResult = await tryAfianfWithFirecrawl(url);
-  if (firecrawlResult.videoUrl) {
-    result.videoUrlNoWatermark = firecrawlResult.videoUrl;
-    result.hasWatermark = false;
-    console.log('[extract-shopee-video] SUCCESS: Got watermark-free video via Firecrawl + Afianf');
-    
-    if (firecrawlResult.title && !result.description) {
-      result.description = firecrawlResult.title;
+  for (const tryUrl of urlsToTryAfianf) {
+    console.log('[extract-shopee-video] LAYER 1: Trying Firecrawl + Afianf with:', tryUrl);
+    const firecrawlResult = await tryAfianfWithFirecrawl(tryUrl);
+    if (firecrawlResult.videoUrl) {
+      result.videoUrlNoWatermark = firecrawlResult.videoUrl;
+      result.hasWatermark = false;
+      console.log('[extract-shopee-video] SUCCESS: Got watermark-free video via Firecrawl + Afianf');
+      
+      if (firecrawlResult.title && !result.description) {
+        result.description = firecrawlResult.title;
+      }
+      if (firecrawlResult.thumbnailUrl && !result.thumbnailUrl) {
+        result.thumbnailUrl = firecrawlResult.thumbnailUrl;
+      }
+      return result;
     }
-    if (firecrawlResult.thumbnailUrl && !result.thumbnailUrl) {
-      result.thumbnailUrl = firecrawlResult.thumbnailUrl;
-    }
-    return result;
   }
   
   // LAYER 2: Afianf direto (tentativa SSR - gratuito mas menos confiável)
-  const afianfResult = await tryAfianfDirect(url);
-  if (afianfResult.videoUrl) {
-    result.videoUrlNoWatermark = afianfResult.videoUrl;
-    result.hasWatermark = false;
-    console.log('[extract-shopee-video] SUCCESS: Got watermark-free video via Afianf direct');
-    
-    if (afianfResult.title && !result.description) {
-      result.description = afianfResult.title;
+  for (const tryUrl of urlsToTryAfianf) {
+    console.log('[extract-shopee-video] LAYER 2: Trying Afianf direct with:', tryUrl);
+    const afianfResult = await tryAfianfDirect(tryUrl);
+    if (afianfResult.videoUrl) {
+      result.videoUrlNoWatermark = afianfResult.videoUrl;
+      result.hasWatermark = false;
+      console.log('[extract-shopee-video] SUCCESS: Got watermark-free video via Afianf direct');
+      
+      if (afianfResult.title && !result.description) {
+        result.description = afianfResult.title;
+      }
+      if (afianfResult.thumbnailUrl && !result.thumbnailUrl) {
+        result.thumbnailUrl = afianfResult.thumbnailUrl;
+      }
+      return result;
     }
-    if (afianfResult.thumbnailUrl && !result.thumbnailUrl) {
-      result.thumbnailUrl = afianfResult.thumbnailUrl;
-    }
-    return result;
   }
   
   // LAYER 3: CDN URL variations (try alternate CDN endpoints)
