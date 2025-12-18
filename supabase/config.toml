@@ -57,3 +57,6 @@ verify_jwt = false
 
 [functions.generate-video-caption]
 verify_jwt = false
+
+[functions.extract-sora-video]
+verify_jwt = false
