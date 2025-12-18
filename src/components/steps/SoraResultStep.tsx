@@ -13,7 +13,18 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 import { SoraVideoData } from '../SoraGenTool';
+
+// Decode HTML entities in video URLs
+function decodeVideoUrl(url: string): string {
+  return url
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#39;/g, "'");
+}
 
 interface SoraResultStepProps {
   videoData: SoraVideoData;
@@ -52,19 +63,29 @@ export const SoraResultStep = ({ videoData, onReset }: SoraResultStepProps) => {
   };
 
   const handleDownload = async () => {
-    const videoUrl = videoData.videoUrlNoWatermark || videoData.videoUrl;
+    const rawVideoUrl = videoData.videoUrlNoWatermark || videoData.videoUrl;
     
-    if (!videoUrl) {
+    if (!rawVideoUrl) {
       toast.error('URL do vídeo não disponível.');
       return;
     }
 
+    const videoUrl = decodeVideoUrl(rawVideoUrl);
+
     try {
-      toast.info('Iniciando download...');
+      toast.info('Iniciando download via proxy...');
       
-      const response = await fetch(videoUrl);
-      const blob = await response.blob();
-      
+      // Use edge function proxy to bypass CORS
+      const { data, error } = await supabase.functions.invoke('extract-sora-video', {
+        body: { action: 'download', videoUrl },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      // Create blob from response
+      const blob = new Blob([data], { type: 'video/mp4' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
