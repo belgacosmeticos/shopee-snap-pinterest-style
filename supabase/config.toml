@@ -51,3 +51,9 @@ verify_jwt = false
 
 [functions.pinterest-create-pin]
 verify_jwt = false
+
+[functions.extract-shopee-video]
+verify_jwt = false
+
+[functions.generate-video-caption]
+verify_jwt = false

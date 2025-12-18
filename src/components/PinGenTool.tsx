@@ -80,31 +80,20 @@ export const PinGenTool = () => {
   };
 
   return (
-    <div className="min-h-screen gradient-soft">
-      <div className="container max-w-4xl py-8 px-4">
-        {/* Header */}
-        <header className="text-center mb-10 animate-slide-up">
-          <h1 className="text-4xl md:text-5xl font-display font-bold mb-3">
-            <span className="text-gradient">PinGen</span>
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            Transforme produtos Shopee em pins virais do Pinterest
-          </p>
-        </header>
-
-        {/* Progress Steps */}
-        <div className="flex justify-center gap-2 mb-8">
-          {['input', 'select', 'generate', 'result'].map((step, index) => (
-            <div
-              key={step}
-              className={`h-2 rounded-full transition-all duration-300 ${
-                index <= ['input', 'select', 'generate', 'result'].indexOf(currentStep)
-                  ? 'w-12 bg-coral'
-                  : 'w-8 bg-muted'
-              }`}
-            />
-          ))}
-        </div>
+    <div className="py-4">
+      {/* Progress Steps */}
+      <div className="flex justify-center gap-2 mb-8">
+        {['input', 'select', 'generate', 'result'].map((step, index) => (
+          <div
+            key={step}
+            className={`h-2 rounded-full transition-all duration-300 ${
+              index <= ['input', 'select', 'generate', 'result'].indexOf(currentStep)
+                ? 'w-12 bg-coral'
+                : 'w-8 bg-muted'
+            }`}
+          />
+        ))}
+      </div>
 
         {/* Step Content */}
         <main className="animate-fade-in">
@@ -155,6 +144,5 @@ export const PinGenTool = () => {
           )}
         </main>
       </div>
-    </div>
   );
 };
