@@ -7,13 +7,112 @@ const corsHeaders = {
 
 interface VideoInfo {
   videoUrl: string | null;
+  videoUrlNoWatermark: string | null;
   title: string | null;
   description: string | null;
   creator: string | null;
   thumbnailUrl: string | null;
   originalUrl: string;
+  hasWatermark: boolean;
   success: boolean;
   error?: string;
+}
+
+// Clean caption - remove everything after "|" and HTML entities
+function cleanCaption(desc: string): string {
+  if (!desc) return '';
+  
+  return desc
+    // Remove everything after the pipe (inclusive)
+    .split('|')[0]
+    // Remove HTML entities
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .trim();
+}
+
+// Try to get video without watermark from Afianf
+async function tryAfianfDownloader(url: string): Promise<{
+  videoUrl: string | null;
+  title: string | null;
+  thumbnailUrl: string | null;
+}> {
+  try {
+    const afianfUrl = `https://afianf.pages.dev/shopee/get/?url=${encodeURIComponent(url)}`;
+    console.log('[extract-shopee-video] Trying Afianf downloader:', afianfUrl);
+    
+    const response = await fetch(afianfUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+        'Referer': 'https://afianf.pages.dev/',
+      },
+    });
+
+    if (!response.ok) {
+      console.log('[extract-shopee-video] Afianf returned status:', response.status);
+      return { videoUrl: null, title: null, thumbnailUrl: null };
+    }
+
+    const html = await response.text();
+    console.log('[extract-shopee-video] Afianf HTML length:', html.length);
+    console.log('[extract-shopee-video] Afianf HTML sample:', html.substring(0, 1000));
+
+    // Extract video URL from <video src="..."> or data attributes
+    const videoPatterns = [
+      /<video[^>]+src="([^"]+)"/i,
+      /src="(https?:\/\/[^"]*\.mp4[^"]*)"/i,
+      /"videoUrl":\s*"([^"]+)"/i,
+      /"video_url":\s*"([^"]+)"/i,
+      /"downloadUrl":\s*"([^"]+)"/i,
+      /href="(https?:\/\/[^"]*\.mp4[^"]*)"/i,
+    ];
+
+    let videoUrl: string | null = null;
+    for (const pattern of videoPatterns) {
+      const match = html.match(pattern);
+      if (match && match[1]) {
+        videoUrl = match[1];
+        console.log('[extract-shopee-video] Afianf found video URL:', videoUrl);
+        break;
+      }
+    }
+
+    // Extract title from <h3>...</h3>
+    const titleMatch = html.match(/<h3[^>]*>([^<]+)<\/h3>/i);
+    const title = titleMatch ? titleMatch[1].trim() : null;
+    if (title) {
+      console.log('[extract-shopee-video] Afianf found title:', title);
+    }
+
+    // Extract thumbnail
+    const thumbPatterns = [
+      /alt="shopee[^"]*"[^>]+src="([^"]+)"/i,
+      /<img[^>]+src="([^"]+)"[^>]+alt="shopee/i,
+      /<img[^>]+src="(https?:\/\/[^"]+)"/i,
+    ];
+
+    let thumbnailUrl: string | null = null;
+    for (const pattern of thumbPatterns) {
+      const match = html.match(pattern);
+      if (match && match[1] && !match[1].includes('favicon')) {
+        thumbnailUrl = match[1];
+        console.log('[extract-shopee-video] Afianf found thumbnail:', thumbnailUrl);
+        break;
+      }
+    }
+
+    return { videoUrl, title, thumbnailUrl };
+  } catch (error) {
+    console.error('[extract-shopee-video] Afianf error:', error);
+    return { videoUrl: null, title: null, thumbnailUrl: null };
+  }
 }
 
 async function followRedirects(url: string): Promise<string> {
@@ -65,7 +164,6 @@ function decodeUnicode(str: string): string {
 }
 
 function extractJsonData(html: string): any {
-  // Try to find __INITIAL_STATE__ or similar JSON data
   const patterns = [
     /__INITIAL_STATE__\s*=\s*({[\s\S]*?});?\s*(?:<\/script>|window\.)/,
     /window\.__DATA__\s*=\s*({[\s\S]*?});?\s*(?:<\/script>|window\.)/,
@@ -87,47 +185,18 @@ function extractJsonData(html: string): any {
   return null;
 }
 
-async function tryExternalDownloader(url: string): Promise<string | null> {
-  // Try using a video download API service
-  const downloadApis = [
-    `https://api.vevioz.com/api/button/videos?url=${encodeURIComponent(url)}`,
-  ];
-  
-  for (const apiUrl of downloadApis) {
-    try {
-      console.log('[extract-shopee-video] Trying external API:', apiUrl);
-      const response = await fetch(apiUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-      });
-      
-      if (response.ok) {
-        const html = await response.text();
-        // Look for download links in response
-        const mp4Match = html.match(/href="(https?:\/\/[^"]+\.mp4[^"]*)"/i);
-        if (mp4Match) {
-          console.log('[extract-shopee-video] Found MP4 from external API');
-          return mp4Match[1];
-        }
-      }
-    } catch (e) {
-      console.log('[extract-shopee-video] External API failed:', e);
-    }
-  }
-  return null;
-}
-
 async function extractVideoFromShopeeVideo(url: string): Promise<VideoInfo> {
   console.log('[extract-shopee-video] Extracting from Shopee Video URL:', url);
   
   const result: VideoInfo = {
     videoUrl: null,
+    videoUrlNoWatermark: null,
     title: null,
     description: null,
     creator: null,
     thumbnailUrl: null,
     originalUrl: url,
+    hasWatermark: true,
     success: false,
   };
 
@@ -150,11 +219,8 @@ async function extractVideoFromShopeeVideo(url: string): Promise<VideoInfo> {
 
     const html = await response.text();
     console.log('[extract-shopee-video] HTML length:', html.length);
-    
-    // Log a sample of the HTML for debugging
     console.log('[extract-shopee-video] HTML sample:', html.substring(0, 2000));
 
-    // Try to extract JSON data first
     const jsonData = extractJsonData(html);
     if (jsonData) {
       console.log('[extract-shopee-video] Found JSON data');
@@ -184,7 +250,6 @@ async function extractVideoFromShopeeVideo(url: string): Promise<VideoInfo> {
       for (const match of matches) {
         let videoUrl = decodeUnicode(match[1]);
         
-        // Validate it looks like a video URL
         if (videoUrl.includes('.mp4') || videoUrl.includes('video') || videoUrl.includes('playback')) {
           console.log('[extract-shopee-video] Found video URL:', videoUrl);
           result.videoUrl = videoUrl;
@@ -207,7 +272,7 @@ async function extractVideoFromShopeeVideo(url: string): Promise<VideoInfo> {
       }
     }
 
-    // Extract title (short)
+    // Extract title
     const titlePatterns = [
       /<meta\s+property="og:title"\s+content="([^"]+)"/i,
       /<meta\s+name="title"\s+content="([^"]+)"/i,
@@ -223,7 +288,7 @@ async function extractVideoFromShopeeVideo(url: string): Promise<VideoInfo> {
       }
     }
 
-    // Extract full description/caption
+    // Extract description and clean it
     const descPatterns = [
       /<meta\s+property="og:description"\s+content="([^"]+)"/i,
       /<meta\s+name="description"\s+content="([^"]+)"/i,
@@ -237,17 +302,19 @@ async function extractVideoFromShopeeVideo(url: string): Promise<VideoInfo> {
     for (const pattern of descPatterns) {
       const match = html.match(pattern);
       if (match) {
-        result.description = decodeUnicode(match[1]).trim();
-        console.log('[extract-shopee-video] Found description:', result.description);
+        const rawDesc = decodeUnicode(match[1]).trim();
+        result.description = cleanCaption(rawDesc);
+        console.log('[extract-shopee-video] Found and cleaned description:', result.description);
         break;
       }
     }
 
-    // If no description, try to find longer text blocks
+    // If no description, try longer text blocks
     if (!result.description) {
       const longTextMatch = html.match(/"(?:video_desc|videoDesc|post_content|postContent)":\s*"([^"]{20,})"/i);
       if (longTextMatch) {
-        result.description = decodeUnicode(longTextMatch[1]).trim();
+        const rawDesc = decodeUnicode(longTextMatch[1]).trim();
+        result.description = cleanCaption(rawDesc);
         console.log('[extract-shopee-video] Found description from video_desc:', result.description);
       }
     }
@@ -287,15 +354,6 @@ async function extractVideoFromShopeeVideo(url: string): Promise<VideoInfo> {
       }
     }
 
-    // If no video URL found, try external downloader
-    if (!result.videoUrl) {
-      console.log('[extract-shopee-video] No video URL found, trying external downloader');
-      const externalUrl = await tryExternalDownloader(url);
-      if (externalUrl) {
-        result.videoUrl = externalUrl;
-      }
-    }
-
     result.success = true;
 
   } catch (error) {
@@ -319,23 +377,49 @@ async function extractVideoInfo(url: string): Promise<VideoInfo> {
     finalUrl = redirUrl;
   }
   
-  // Step 3: If it's sv.shopee.com.br (Shopee Video), extract video
+  // Step 3: Extract video from Shopee page
+  let result: VideoInfo;
+  
   if (finalUrl.includes('sv.shopee') || finalUrl.includes('share-video')) {
-    return await extractVideoFromShopeeVideo(finalUrl);
-  }
-  
-  // Step 4: Try to follow one more redirect level
-  const secondRedirect = await followRedirects(finalUrl);
-  if (secondRedirect !== finalUrl) {
-    const redirUrl2 = extractRedirUrl(secondRedirect);
-    if (redirUrl2) {
-      return await extractVideoFromShopeeVideo(redirUrl2);
+    result = await extractVideoFromShopeeVideo(finalUrl);
+  } else {
+    // Try to follow one more redirect level
+    const secondRedirect = await followRedirects(finalUrl);
+    if (secondRedirect !== finalUrl) {
+      const redirUrl2 = extractRedirUrl(secondRedirect);
+      if (redirUrl2) {
+        result = await extractVideoFromShopeeVideo(redirUrl2);
+      } else {
+        result = await extractVideoFromShopeeVideo(secondRedirect);
+      }
+    } else {
+      result = await extractVideoFromShopeeVideo(finalUrl);
     }
-    return await extractVideoFromShopeeVideo(secondRedirect);
   }
   
-  // Fallback: try to extract from whatever page we have
-  return await extractVideoFromShopeeVideo(finalUrl);
+  // Step 4: Try to get video without watermark using Afianf
+  console.log('[extract-shopee-video] Trying to get video without watermark...');
+  const afianfResult = await tryAfianfDownloader(url);
+  
+  if (afianfResult.videoUrl) {
+    result.videoUrlNoWatermark = afianfResult.videoUrl;
+    result.hasWatermark = false;
+    console.log('[extract-shopee-video] Got watermark-free video from Afianf!');
+    
+    // Use Afianf title if available and cleaner
+    if (afianfResult.title && !result.description) {
+      result.description = cleanCaption(afianfResult.title);
+    }
+    
+    // Use Afianf thumbnail if we don't have one
+    if (afianfResult.thumbnailUrl && !result.thumbnailUrl) {
+      result.thumbnailUrl = afianfResult.thumbnailUrl;
+    }
+  } else {
+    console.log('[extract-shopee-video] Could not get watermark-free video');
+  }
+  
+  return result;
 }
 
 serve(async (req) => {
