@@ -35,7 +35,7 @@ function cleanCaption(desc: string): string {
     .trim();
 }
 
-// ========== LAYER 1: Afianf direto (GRATUITO) ==========
+// ========== LAYER 1: Afianf direto (GRATUITO - SSR) ==========
 async function tryAfianfDirect(url: string): Promise<{
   videoUrl: string | null;
   title: string | null;
@@ -43,52 +43,89 @@ async function tryAfianfDirect(url: string): Promise<{
 }> {
   try {
     const afianfUrl = `https://afianf.pages.dev/shopee/get/?url=${encodeURIComponent(url)}`;
-    console.log('[extract-shopee-video] LAYER 1: Trying Afianf direct:', afianfUrl);
+    console.log('[extract-shopee-video] LAYER 1: Trying Afianf SSR:', afianfUrl);
     
     const response = await fetch(afianfUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
-        'Referer': 'https://afianf.pages.dev/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
       },
     });
 
     if (!response.ok) {
-      console.log('[extract-shopee-video] Afianf direct returned status:', response.status);
+      console.log('[extract-shopee-video] Afianf SSR returned status:', response.status);
       return { videoUrl: null, title: null, thumbnailUrl: null };
     }
 
     const html = await response.text();
-    console.log('[extract-shopee-video] Afianf direct HTML length:', html.length);
+    console.log('[extract-shopee-video] Afianf SSR HTML length:', html.length);
+    
+    // Log a snippet to debug what we're getting
+    const videoTagIndex = html.indexOf('<video');
+    if (videoTagIndex > -1) {
+      console.log('[extract-shopee-video] Found <video> tag at index:', videoTagIndex);
+      console.log('[extract-shopee-video] Video tag snippet:', html.substring(videoTagIndex, videoTagIndex + 300));
+    } else {
+      console.log('[extract-shopee-video] No <video> tag found in HTML');
+      // Log first 500 chars to see what we got
+      console.log('[extract-shopee-video] HTML preview:', html.substring(0, 500));
+    }
 
-    // Try to extract from pre-rendered content or JSON embedded in HTML
-    const videoPatterns = [
-      /<video[^>]+src="([^"]+)"/i,
-      /src="(https?:\/\/[^"]*\.mp4[^"]*)"/i,
-      /"videoUrl":\s*"([^"]+)"/i,
-      /"downloadUrl":\s*"([^"]+)"/i,
-    ];
-
+    // Try multiple patterns to extract video URL from SSR HTML
+    // Pattern 1: <video ... src="URL">
     let videoUrl: string | null = null;
-    for (const pattern of videoPatterns) {
-      const match = html.match(pattern);
-      if (match && match[1]) {
-        videoUrl = match[1];
-        console.log('[extract-shopee-video] Afianf direct found video URL:', videoUrl);
-        break;
+    
+    // Direct video tag extraction (handles attributes in any order)
+    const videoTagMatch = html.match(/<video[^>]*\ssrc="([^"]+)"[^>]*>/i);
+    if (videoTagMatch && videoTagMatch[1]) {
+      videoUrl = videoTagMatch[1];
+      console.log('[extract-shopee-video] Afianf SSR found video via <video> tag:', videoUrl);
+    }
+    
+    // Pattern 2: Any .mp4 URL from susercontent.com (Shopee CDN)
+    if (!videoUrl) {
+      const mp4Match = html.match(/["'](https?:\/\/[^"']*susercontent\.com[^"']*\.mp4[^"']*)["']/i);
+      if (mp4Match && mp4Match[1]) {
+        videoUrl = mp4Match[1];
+        console.log('[extract-shopee-video] Afianf SSR found video via .mp4 pattern:', videoUrl);
+      }
+    }
+    
+    // Pattern 3: down-*.vod.susercontent.com pattern
+    if (!videoUrl) {
+      const downMatch = html.match(/["'](https?:\/\/down[^"']*\.mp4[^"']*)["']/i);
+      if (downMatch && downMatch[1]) {
+        videoUrl = downMatch[1];
+        console.log('[extract-shopee-video] Afianf SSR found video via down-* pattern:', videoUrl);
       }
     }
 
+    // Extract title from <h3>
     const titleMatch = html.match(/<h3[^>]*>([^<]+)<\/h3>/i);
     const title = titleMatch ? cleanCaption(titleMatch[1]) : null;
+    if (title) {
+      console.log('[extract-shopee-video] Afianf SSR found title:', title);
+    }
 
-    const thumbMatch = html.match(/<img[^>]+src="(https?:\/\/[^"]+)"[^>]*>/i);
-    const thumbnailUrl = thumbMatch && !thumbMatch[1].includes('favicon') ? thumbMatch[1] : null;
+    // Extract thumbnail from img with susercontent.com
+    const thumbMatch = html.match(/<img[^>]+src="(https?:\/\/[^"]*susercontent\.com[^"]+)"[^>]*>/i);
+    const thumbnailUrl = thumbMatch ? thumbMatch[1] : null;
+    if (thumbnailUrl) {
+      console.log('[extract-shopee-video] Afianf SSR found thumbnail:', thumbnailUrl);
+    }
 
     return { videoUrl, title, thumbnailUrl };
   } catch (error) {
-    console.error('[extract-shopee-video] Afianf direct error:', error);
+    console.error('[extract-shopee-video] Afianf SSR error:', error);
     return { videoUrl: null, title: null, thumbnailUrl: null };
   }
 }
