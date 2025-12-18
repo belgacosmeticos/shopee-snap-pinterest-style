@@ -127,13 +127,17 @@ export const VideoResultStep = ({
 
   const [downloadingVideo, setDownloadingVideo] = useState<Record<number, boolean>>({});
 
-  const handleDownloadVideo = async (videoUrl: string | null, originalUrl: string, index: number) => {
+  const handleDownloadVideo = async (video: ExtractedVideo, index: number) => {
     setDownloadingVideo(prev => ({ ...prev, [index]: true }));
     
-    if (videoUrl) {
+    // Prioritize watermark-free URL
+    const downloadUrl = video.videoUrlNoWatermark || video.videoUrl;
+    const isWatermarkFree = !!video.videoUrlNoWatermark;
+    
+    if (downloadUrl) {
       try {
-        toast.info('Baixando vídeo...');
-        const response = await fetch(videoUrl, { mode: 'cors' });
+        toast.info(isWatermarkFree ? 'Baixando vídeo sem marca d\'água...' : 'Baixando vídeo...');
+        const response = await fetch(downloadUrl, { mode: 'cors' });
         
         if (!response.ok) {
           throw new Error('Falha ao baixar');
@@ -148,16 +152,16 @@ export const VideoResultStep = ({
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        toast.success('Vídeo baixado com sucesso!');
+        toast.success(isWatermarkFree ? 'Vídeo baixado sem marca d\'água!' : 'Vídeo baixado!');
       } catch (err) {
         console.error('[VideoResultStep] Download error:', err);
         // Fallback: open in new tab
-        window.open(videoUrl, '_blank');
+        window.open(downloadUrl, '_blank');
         toast.info('Abrindo vídeo em nova aba - clique com botão direito e "Salvar como"');
       }
     } else {
       // No direct video URL - open original and show instructions
-      window.open(originalUrl, '_blank');
+      window.open(video.originalUrl, '_blank');
       toast.info('Abra o app Shopee, toque em "Abrir Link" e baixe pelo app', {
         duration: 5000,
       });
@@ -306,7 +310,7 @@ export const VideoResultStep = ({
                     <Button
                       variant="default"
                       size="sm"
-                      onClick={() => handleDownloadVideo(video.videoUrl, video.originalUrl, index)}
+                      onClick={() => handleDownloadVideo(video, index)}
                       disabled={downloadingVideo[index]}
                       className="gap-2 gradient-primary"
                     >
@@ -315,19 +319,32 @@ export const VideoResultStep = ({
                       ) : (
                         <Download className="w-4 h-4" />
                       )}
-                      {video.videoUrl ? 'Baixar MP4' : 'Abrir no App'}
+                      {video.videoUrlNoWatermark ? 'Baixar HD' : video.videoUrl ? 'Baixar MP4' : 'Abrir no App'}
                     </Button>
                     
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleCopyVideoLink(video.videoUrl, video.originalUrl)}
+                      onClick={() => handleCopyVideoLink(video.videoUrlNoWatermark || video.videoUrl, video.originalUrl)}
                       className="gap-2"
                     >
                       <Copy className="w-4 h-4" />
                       Copiar Link
                     </Button>
                   </div>
+                  
+                  {/* Watermark status indicator */}
+                  {video.videoUrlNoWatermark && (
+                    <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                      <Check className="w-3 h-3" />
+                      Sem marca d'água
+                    </p>
+                  )}
+                  {!video.videoUrlNoWatermark && video.videoUrl && (
+                    <p className="text-xs text-muted-foreground">
+                      Com marca d'água da Shopee
+                    </p>
+                  )}
                 </div>
               </div>
 

@@ -12,11 +12,13 @@ export interface VideoProductData {
 
 export interface ExtractedVideo {
   videoUrl: string | null;
+  videoUrlNoWatermark: string | null;
   title: string | null;
   description: string | null;
   creator: string | null;
   thumbnailUrl: string | null;
   originalUrl: string;
+  hasWatermark?: boolean;
   caption?: string;
   captionFacebook?: string;
 }

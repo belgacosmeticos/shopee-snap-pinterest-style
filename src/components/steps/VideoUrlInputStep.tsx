@@ -45,9 +45,17 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
     }
   };
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+    
+    // Prevent double-submit
+    if (isSubmitting || isLoading) return;
+    
     setError('');
+    setIsSubmitting(true);
 
     if (!productUrl.trim()) {
       setError('Por favor, insira o link do produto');
@@ -96,33 +104,39 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
 
           if (videoError) {
             console.error('[VideoUrlInputStep] Video extraction error:', videoError);
-            extractedVideos.push({
+        extractedVideos.push({
               videoUrl: null,
+              videoUrlNoWatermark: null,
               title: null,
               description: null,
               creator: null,
               thumbnailUrl: null,
               originalUrl: videoUrl,
+              hasWatermark: true,
             });
           } else {
             extractedVideos.push({
               videoUrl: videoData?.videoUrl || null,
+              videoUrlNoWatermark: videoData?.videoUrlNoWatermark || null,
               title: videoData?.title || null,
               description: videoData?.description || null,
               creator: videoData?.creator || null,
               thumbnailUrl: videoData?.thumbnailUrl || null,
               originalUrl: videoData?.originalUrl || videoUrl,
+              hasWatermark: videoData?.hasWatermark ?? true,
             });
           }
         } catch (err) {
           console.error('[VideoUrlInputStep] Error extracting video:', err);
           extractedVideos.push({
             videoUrl: null,
+            videoUrlNoWatermark: null,
             title: null,
             description: null,
             creator: null,
             thumbnailUrl: null,
             originalUrl: videoUrl,
+            hasWatermark: true,
           });
         }
       }
@@ -148,6 +162,7 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
       setIsLoading(false);
       setExtractingProduct(false);
       setExtractingVideos(false);
+      setIsSubmitting(false);
     }
   };
 
