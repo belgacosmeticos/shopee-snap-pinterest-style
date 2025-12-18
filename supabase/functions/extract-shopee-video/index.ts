@@ -59,8 +59,8 @@ async function tryAfianfWithFirecrawl(url: string): Promise<{
       },
       body: JSON.stringify({
         url: afianfUrl,
-        formats: ['html'],
-        waitFor: 3000, // Wait for JS to render
+        formats: ['html', 'rawHtml'],
+        waitFor: 8000, // Increased wait time for JS to fully render
         onlyMainContent: false,
       }),
     });
@@ -72,9 +72,15 @@ async function tryAfianfWithFirecrawl(url: string): Promise<{
     }
 
     const data = await response.json();
-    const html = data.data?.html || data.html || '';
+    // Try rawHtml first (has more complete content), then html
+    const html = data.data?.rawHtml || data.rawHtml || data.data?.html || data.html || '';
     
     console.log('[extract-shopee-video] Firecrawl returned HTML length:', html.length);
+    
+    // Log a snippet to help debug what Afianf is returning
+    if (html.length > 0) {
+      console.log('[extract-shopee-video] HTML snippet (first 1000 chars):', html.substring(0, 1000));
+    }
 
     if (!html) {
       console.log('[extract-shopee-video] Firecrawl returned empty HTML');
@@ -124,6 +130,31 @@ async function tryAfianfWithFirecrawl(url: string): Promise<{
       if (downMatch && downMatch[1]) {
         videoUrl = downMatch[1];
         console.log('[extract-shopee-video] Found video via down-* pattern:', videoUrl);
+      }
+    }
+    
+    // Pattern 5: Look for video URL without /mms/ path (watermark-free version)
+    if (!videoUrl) {
+      const cleanMp4Match = html.match(/["'](https?:\/\/[^"']*\.mp4)["']/gi);
+      if (cleanMp4Match) {
+        for (const match of cleanMp4Match) {
+          const url = match.replace(/["']/g, '');
+          // Prefer URLs without /mms/ (watermark path)
+          if (!url.includes('/mms/') && (url.includes('susercontent') || url.includes('shopee'))) {
+            videoUrl = url;
+            console.log('[extract-shopee-video] Found clean video URL (no /mms/):', videoUrl);
+            break;
+          }
+        }
+      }
+    }
+    
+    // Pattern 6: Look for any .mp4 URL as last resort
+    if (!videoUrl) {
+      const anyMp4Match = html.match(/(https?:\/\/[^\s"'<>]+\.mp4)/i);
+      if (anyMp4Match && anyMp4Match[1]) {
+        videoUrl = anyMp4Match[1];
+        console.log('[extract-shopee-video] Found video via any .mp4 pattern:', videoUrl);
       }
     }
 
