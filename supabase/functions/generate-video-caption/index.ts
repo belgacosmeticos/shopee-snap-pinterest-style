@@ -11,30 +11,65 @@ serve(async (req) => {
   }
 
   try {
-    const { productTitle, videoTitle, platform } = await req.json();
+    const { productTitle, videoTitle, platform, rewriteTitle, originalTitle, rewriteCaption, originalCaption } = await req.json();
     
-    console.log('[generate-video-caption] Input:', { productTitle, videoTitle, platform });
+    console.log('[generate-video-caption] Input:', { productTitle, videoTitle, platform, rewriteTitle, rewriteCaption });
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     if (!LOVABLE_API_KEY) {
       throw new Error('LOVABLE_API_KEY not configured');
     }
 
-    const platformInstructions = platform === 'facebook' 
-      ? `Para Facebook:
+    let prompt: string;
+    let responseKey: string;
+
+    if (rewriteTitle && originalTitle) {
+      // Rewrite title keeping 99% of the idea
+      prompt = `Reescreva este título de produto mantendo 99% da ideia original, apenas variando palavras e estrutura para não ficar idêntico:
+
+Título original: "${originalTitle}"
+
+REGRAS:
+- Mantenha TODAS as informações importantes (marca, modelo, características)
+- Apenas varie a ordem das palavras ou use sinônimos
+- Mantenha o mesmo comprimento aproximado
+- NÃO adicione informações novas
+- NÃO remova informações importantes
+
+Responda APENAS com o título reescrito, sem explicações.`;
+      responseKey = 'rewrittenTitle';
+    } else if (rewriteCaption && originalCaption) {
+      // Rewrite caption keeping 99% of the idea
+      prompt = `Reescreva esta legenda mantendo 99% da ideia original, apenas variando palavras para não ficar idêntica ao postar várias vezes:
+
+Legenda original: "${originalCaption}"
+
+REGRAS:
+- Mantenha o mesmo tom e estilo
+- Mantenha emojis e hashtags similares
+- Apenas varie palavras e estrutura da frase
+- Mantenha o CTA (call to action) se houver
+- NÃO mude o sentido da mensagem
+
+Responda APENAS com a legenda reescrita, sem explicações.`;
+      responseKey = 'rewrittenCaption';
+    } else {
+      // Generate new caption for platform
+      const platformInstructions = platform === 'facebook' 
+        ? `Para Facebook Reels:
 - Use emojis relevantes mas não em excesso
 - Inclua uma chamada para ação clara
 - Mencione o benefício principal do produto
 - Use hashtags populares no final (3-5 hashtags)
 - Tom mais conversacional e direto`
-      : `Para Pinterest:
+        : `Para Pinterest:
 - Use palavras-chave relevantes naturalmente
 - Inclua emojis para destaque visual
 - Foque nos benefícios e uso do produto
 - Hashtags no final (3-5 hashtags relevantes)
 - Tom inspiracional e aspiracional`;
 
-    const prompt = `Crie uma legenda viral para um vídeo de afiliado sobre o produto: "${productTitle}"
+      prompt = `Crie uma legenda viral para um vídeo de afiliado sobre o produto: "${productTitle}"
 ${videoTitle ? `O vídeo mostra: "${videoTitle}"` : ''}
 
 ${platformInstructions}
@@ -46,6 +81,8 @@ IMPORTANTE:
 - Inclua CTA como "Link na bio" ou "Confira o link"
 
 Responda APENAS com a legenda, sem explicações adicionais.`;
+      responseKey = 'caption';
+    }
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -56,7 +93,7 @@ Responda APENAS com a legenda, sem explicações adicionais.`;
       body: JSON.stringify({
         model: 'google/gemini-2.5-flash',
         messages: [
-          { role: 'system', content: 'Você é um especialista em marketing de afiliados e criação de conteúdo viral para redes sociais.' },
+          { role: 'system', content: 'Você é um especialista em marketing de afiliados e criação de conteúdo viral para redes sociais. Responda apenas com o texto solicitado, sem explicações.' },
           { role: 'user', content: prompt }
         ],
       }),
@@ -83,12 +120,12 @@ Responda APENAS com a legenda, sem explicações adicionais.`;
     }
 
     const data = await response.json();
-    const caption = data.choices?.[0]?.message?.content?.trim();
+    const generatedText = data.choices?.[0]?.message?.content?.trim();
 
-    console.log('[generate-video-caption] Generated caption:', caption);
+    console.log('[generate-video-caption] Generated:', responseKey, generatedText);
 
     return new Response(
-      JSON.stringify({ caption }),
+      JSON.stringify({ [responseKey]: generatedText }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 

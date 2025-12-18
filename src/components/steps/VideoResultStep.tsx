@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
-import { Copy, RefreshCw, Home, Check, Download, ExternalLink, DollarSign, Loader2, Video, Sparkles } from 'lucide-react';
+import { Copy, RefreshCw, Home, Check, Download, ExternalLink, DollarSign, Loader2, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import type { VideoProductData, ExtractedVideo } from '../VideoGenTool';
@@ -35,14 +35,25 @@ export const VideoResultStep = ({
   onReset 
 }: VideoResultStepProps) => {
   const [copiedLink, setCopiedLink] = useState(false);
-  const [generatingCaptions, setGeneratingCaptions] = useState<Record<number, boolean>>({});
-  const [copiedCaptions, setCopiedCaptions] = useState<Record<string, boolean>>({});
+  const [copiedTitle, setCopiedTitle] = useState(false);
+  const [rewritingTitle, setRewritingTitle] = useState(false);
+  const [displayTitle, setDisplayTitle] = useState(productData.title);
+  const [rewritingCaptions, setRewritingCaptions] = useState<Record<number, boolean>>({});
+  const [copiedCaptions, setCopiedCaptions] = useState<Record<number, boolean>>({});
+  const [videoCaptions, setVideoCaptions] = useState<Record<number, string>>(() => {
+    // Initialize with original video titles/descriptions as captions
+    const initial: Record<number, string> = {};
+    videos.forEach((video, index) => {
+      initial[index] = video.title || `${productData.title} ✨ Link na bio! #shopee #afiliado`;
+    });
+    return initial;
+  });
 
-  const handleCopy = async (text: string, key: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopiedCaptions(prev => ({ ...prev, [key]: true }));
-    setTimeout(() => setCopiedCaptions(prev => ({ ...prev, [key]: false })), 2000);
-    toast.success('Copiado!');
+  const handleCopyTitle = async () => {
+    await navigator.clipboard.writeText(displayTitle);
+    setCopiedTitle(true);
+    setTimeout(() => setCopiedTitle(false), 2000);
+    toast.success('Título copiado!');
   };
 
   const handleCopyAffiliateLink = async () => {
@@ -54,36 +65,61 @@ export const VideoResultStep = ({
     }
   };
 
-  const handleGenerateCaption = async (index: number, platform: 'pinterest' | 'facebook') => {
-    setGeneratingCaptions(prev => ({ ...prev, [index]: true }));
+  const handleCopyCaption = async (index: number) => {
+    await navigator.clipboard.writeText(videoCaptions[index]);
+    setCopiedCaptions(prev => ({ ...prev, [index]: true }));
+    setTimeout(() => setCopiedCaptions(prev => ({ ...prev, [index]: false })), 2000);
+    toast.success('Legenda copiada!');
+  };
 
+  const handleRewriteTitle = async () => {
+    setRewritingTitle(true);
     try {
-      const video = videos[index];
       const { data, error } = await supabase.functions.invoke('generate-video-caption', {
         body: {
           productTitle: productData.title,
-          videoTitle: video.title,
-          platform,
+          rewriteTitle: true,
+          originalTitle: displayTitle,
         }
       });
 
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
 
-      const updatedVideos = [...videos];
-      if (platform === 'pinterest') {
-        updatedVideos[index] = { ...updatedVideos[index], caption: data.caption };
-      } else {
-        updatedVideos[index] = { ...updatedVideos[index], captionFacebook: data.caption };
-      }
-      onUpdateVideos(updatedVideos);
-
-      toast.success(`Legenda para ${platform === 'pinterest' ? 'Pinterest' : 'Facebook'} gerada!`);
+      setDisplayTitle(data.rewrittenTitle || displayTitle);
+      toast.success('Título reescrito!');
     } catch (err: any) {
-      console.error('[VideoResultStep] Error generating caption:', err);
-      toast.error(err.message || 'Erro ao gerar legenda');
+      console.error('[VideoResultStep] Error rewriting title:', err);
+      toast.error(err.message || 'Erro ao reescrever título');
     } finally {
-      setGeneratingCaptions(prev => ({ ...prev, [index]: false }));
+      setRewritingTitle(false);
+    }
+  };
+
+  const handleRewriteCaption = async (index: number) => {
+    setRewritingCaptions(prev => ({ ...prev, [index]: true }));
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-video-caption', {
+        body: {
+          productTitle: productData.title,
+          rewriteCaption: true,
+          originalCaption: videoCaptions[index],
+        }
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      setVideoCaptions(prev => ({
+        ...prev,
+        [index]: data.rewrittenCaption || prev[index]
+      }));
+      toast.success('Legenda reescrita!');
+    } catch (err: any) {
+      console.error('[VideoResultStep] Error rewriting caption:', err);
+      toast.error(err.message || 'Erro ao reescrever legenda');
+    } finally {
+      setRewritingCaptions(prev => ({ ...prev, [index]: false }));
     }
   };
 
@@ -111,26 +147,52 @@ export const VideoResultStep = ({
     }
   };
 
-  const handleSharePinterest = (caption: string) => {
-    const url = `https://www.pinterest.com/pin-builder/?description=${encodeURIComponent(caption)}`;
+  const handleSharePinterest = () => {
+    // Direct link to Pinterest Pin Builder
+    const url = `https://www.pinterest.com/pin-builder/`;
     window.open(url, '_blank');
+    toast.info('Faça upload do vídeo e cole a legenda');
   };
 
-  const handleShareFacebook = () => {
-    const url = `https://www.facebook.com/`;
+  const handleShareFacebookReels = () => {
+    // Direct link to Facebook Reels Creator
+    const url = `https://www.facebook.com/reels/create`;
     window.open(url, '_blank');
-    toast.info('Cole a legenda e faça upload do vídeo no Facebook');
+    toast.info('Faça upload do vídeo e cole a legenda');
   };
 
   return (
     <div className="space-y-6">
-      {/* Product Title */}
+      {/* Product Title Card */}
       <Card className="p-4 md:p-6 shadow-card gradient-card">
-        <h2 className="text-xl md:text-2xl font-display font-semibold mb-2">
-          📦 {productData.title}
-        </h2>
-        <p className="text-muted-foreground text-sm">
-          {videos.length} vídeo(s) extraído(s)
+        <div className="flex items-center gap-2 mb-3">
+          <h3 className="text-sm font-medium text-muted-foreground">Título do Produto</h3>
+        </div>
+        <div className="flex gap-2">
+          <Input
+            value={displayTitle}
+            readOnly
+            className="flex-1 bg-secondary/50 font-medium"
+          />
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handleRewriteTitle}
+            disabled={rewritingTitle}
+            title="Reescrever com IA"
+          >
+            <RefreshCw className={`w-4 h-4 ${rewritingTitle ? 'animate-spin' : ''}`} />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handleCopyTitle}
+          >
+            {copiedTitle ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">
+          {videos.length} vídeo(s) extraído(s) • Clique em ♻️ para variar o texto com IA
         </p>
       </Card>
 
@@ -142,7 +204,7 @@ export const VideoResultStep = ({
               <DollarSign className="w-4 h-4 text-green-600" />
             </div>
             <h3 className="text-lg font-display font-semibold text-green-700 dark:text-green-400">
-              Link de Afiliado Convertido
+              Link de Afiliado
             </h3>
           </div>
           
@@ -171,7 +233,7 @@ export const VideoResultStep = ({
           </div>
           
           <p className="text-xs text-muted-foreground mt-2">
-            Use este link nas legendas para ganhar comissão! 💰
+            Coloque este link na bio ou descrição para ganhar comissão! 💰
           </p>
         </Card>
       )}
@@ -180,7 +242,7 @@ export const VideoResultStep = ({
       <div className="space-y-4">
         <h3 className="text-lg font-display font-semibold flex items-center gap-2">
           <Video className="w-5 h-5 text-coral" />
-          Vídeos Extraídos
+          Vídeos
         </h3>
 
         {videos.map((video, index) => (
@@ -203,144 +265,92 @@ export const VideoResultStep = ({
                   )}
                 </div>
 
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-semibold text-sm md:text-base mb-1 line-clamp-2">
-                    {video.title || `Vídeo ${index + 1}`}
+                {/* Info & Download */}
+                <div className="flex-1 min-w-0 space-y-3">
+                  <h4 className="font-semibold text-sm md:text-base line-clamp-2">
+                    Vídeo {index + 1}
                   </h4>
                   {video.creator && (
-                    <p className="text-xs text-muted-foreground mb-2">
+                    <p className="text-xs text-muted-foreground">
                       Por: @{video.creator}
                     </p>
                   )}
                   
                   {/* Download Button */}
                   <Button
-                    variant="outline"
+                    variant="default"
                     size="sm"
                     onClick={() => handleDownloadVideo(video.videoUrl, video.originalUrl)}
-                    className="gap-2"
+                    className="gap-2 gradient-primary"
                   >
                     <Download className="w-4 h-4" />
-                    {video.videoUrl ? 'Baixar Vídeo' : 'Abrir Link'}
+                    {video.videoUrl ? 'Baixar MP4' : 'Abrir Link'}
                   </Button>
                 </div>
               </div>
 
-              {/* Caption Generation */}
+              {/* Caption Section */}
               <div className="space-y-3 pt-3 border-t">
-                {/* Pinterest Caption */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium flex items-center gap-2">
-                      <PinterestIcon />
-                      Legenda Pinterest
-                    </label>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleGenerateCaption(index, 'pinterest')}
-                      disabled={generatingCaptions[index]}
-                      className="gap-2"
-                    >
-                      {generatingCaptions[index] ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Sparkles className="w-4 h-4" />
-                      )}
-                      Gerar
-                    </Button>
-                  </div>
-                  {video.caption && (
-                    <div className="space-y-2">
-                      <Textarea
-                        value={video.caption}
-                        readOnly
-                        className="min-h-[80px] text-sm bg-secondary/50"
-                      />
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleCopy(video.caption!, `pinterest-${index}`)}
-                          className="gap-2"
-                        >
-                          {copiedCaptions[`pinterest-${index}`] ? (
-                            <Check className="w-4 h-4 text-green-500" />
-                          ) : (
-                            <Copy className="w-4 h-4" />
-                          )}
-                          Copiar
-                        </Button>
-                        <Button
-                          variant="pinterest"
-                          size="sm"
-                          onClick={() => handleSharePinterest(video.caption!)}
-                          className="gap-2"
-                        >
-                          <PinterestIcon />
-                          Postar
-                        </Button>
-                      </div>
-                    </div>
-                  )}
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">Legenda</label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleRewriteCaption(index)}
+                    disabled={rewritingCaptions[index]}
+                    className="gap-2"
+                    title="Reescrever com IA (mantém 99% da ideia)"
+                  >
+                    {rewritingCaptions[index] ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
+                    Variar
+                  </Button>
                 </div>
+                
+                <Textarea
+                  value={videoCaptions[index]}
+                  onChange={(e) => setVideoCaptions(prev => ({ ...prev, [index]: e.target.value }))}
+                  className="min-h-[100px] text-sm"
+                  placeholder="Legenda do vídeo..."
+                />
 
-                {/* Facebook Caption */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium flex items-center gap-2">
-                      <FacebookIcon />
-                      Legenda Facebook
-                    </label>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleGenerateCaption(index, 'facebook')}
-                      disabled={generatingCaptions[index]}
-                      className="gap-2"
-                    >
-                      {generatingCaptions[index] ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Sparkles className="w-4 h-4" />
-                      )}
-                      Gerar
-                    </Button>
-                  </div>
-                  {video.captionFacebook && (
-                    <div className="space-y-2">
-                      <Textarea
-                        value={video.captionFacebook}
-                        readOnly
-                        className="min-h-[80px] text-sm bg-secondary/50"
-                      />
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleCopy(video.captionFacebook!, `facebook-${index}`)}
-                          className="gap-2"
-                        >
-                          {copiedCaptions[`facebook-${index}`] ? (
-                            <Check className="w-4 h-4 text-green-500" />
-                          ) : (
-                            <Copy className="w-4 h-4" />
-                          )}
-                          Copiar
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleShareFacebook}
-                          className="gap-2 bg-[#1877F2] hover:bg-[#1877F2]/90 text-white border-0"
-                        >
-                          <FacebookIcon />
-                          Postar
-                        </Button>
-                      </div>
-                    </div>
-                  )}
+                {/* Action Buttons */}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleCopyCaption(index)}
+                    className="gap-2"
+                  >
+                    {copiedCaptions[index] ? (
+                      <Check className="w-4 h-4 text-green-500" />
+                    ) : (
+                      <Copy className="w-4 h-4" />
+                    )}
+                    Copiar
+                  </Button>
+                  
+                  <Button
+                    variant="pinterest"
+                    size="sm"
+                    onClick={handleSharePinterest}
+                    className="gap-2"
+                  >
+                    <PinterestIcon />
+                    Criar Pin
+                  </Button>
+                  
+                  <Button
+                    size="sm"
+                    onClick={handleShareFacebookReels}
+                    className="gap-2 bg-[#1877F2] hover:bg-[#1877F2]/90 text-white"
+                  >
+                    <FacebookIcon />
+                    Criar Reel
+                  </Button>
                 </div>
               </div>
             </div>
