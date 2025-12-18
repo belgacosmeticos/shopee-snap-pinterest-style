@@ -2,20 +2,44 @@ import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Sparkles, Link, Loader2 } from 'lucide-react';
+import { Sparkles, Link, Loader2, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { SoraVideoData } from '../SoraGenTool';
 
 interface SoraUrlInputStepProps {
-  onSubmit: (data: SoraVideoData) => void;
+  onSubmit: (data: SoraVideoData[]) => void;
   isLoading: boolean;
   setIsLoading: (loading: boolean) => void;
 }
 
 export const SoraUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: SoraUrlInputStepProps) => {
-  const [url, setUrl] = useState('');
+  const [urls, setUrls] = useState<string[]>(['', '', '']);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [totalToExtract, setTotalToExtract] = useState(0);
+
+  const addUrl = () => {
+    if (urls.length < 5) {
+      setUrls([...urls, '']);
+    }
+  };
+
+  const removeUrl = (index: number) => {
+    if (urls.length > 1) {
+      setUrls(urls.filter((_, i) => i !== index));
+    }
+  };
+
+  const updateUrl = (index: number, value: string) => {
+    const newUrls = [...urls];
+    newUrls[index] = value;
+    setUrls(newUrls);
+  };
+
+  const isValidSoraUrl = (url: string) => {
+    return url.includes('sora.com') || url.includes('openai.com') || url.includes('chatgpt.com');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,46 +47,78 @@ export const SoraUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: SoraUrlI
     
     if (isSubmitting || isLoading) return;
     
-    const trimmedUrl = url.trim();
-    
-    if (!trimmedUrl) {
-      toast.error('Por favor, insira uma URL do Sora.');
+    // Filter valid URLs
+    const validUrls = urls
+      .map(url => url.trim())
+      .filter(url => url.length > 0);
+
+    if (validUrls.length === 0) {
+      toast.error('Por favor, insira pelo menos uma URL do Sora.');
       return;
     }
 
-    // Validate Sora URL
-    if (!trimmedUrl.includes('sora.com') && !trimmedUrl.includes('openai.com') && !trimmedUrl.includes('chatgpt.com')) {
-      toast.error('Por favor, insira uma URL válida do Sora.');
+    // Validate all URLs
+    const invalidUrls = validUrls.filter(url => !isValidSoraUrl(url));
+    if (invalidUrls.length > 0) {
+      toast.error('Algumas URLs não são válidas do Sora. Verifique e tente novamente.');
       return;
     }
 
     setIsSubmitting(true);
     setIsLoading(true);
+    setTotalToExtract(validUrls.length);
+
+    const extractedVideos: SoraVideoData[] = [];
 
     try {
-      toast.info('Extraindo vídeo do Sora...');
-      
-      const { data, error } = await supabase.functions.invoke('extract-sora-video', {
-        body: { url: trimmedUrl }
-      });
+      for (let i = 0; i < validUrls.length; i++) {
+        setCurrentIndex(i + 1);
+        toast.info(`Extraindo vídeo ${i + 1} de ${validUrls.length}...`);
+        
+        const { data, error } = await supabase.functions.invoke('extract-sora-video', {
+          body: { url: validUrls[i] }
+        });
 
-      if (error) {
-        console.error('Error extracting Sora video:', error);
-        toast.error('Erro ao extrair vídeo. Tente novamente.');
-        setIsSubmitting(false);
-        setIsLoading(false);
-        return;
+        if (error) {
+          console.error(`Error extracting video ${i + 1}:`, error);
+          extractedVideos.push({
+            videoUrl: null,
+            videoUrlNoWatermark: null,
+            title: null,
+            prompt: null,
+            thumbnailUrl: null,
+            creator: null,
+            originalUrl: validUrls[i],
+            hasWatermark: false,
+            success: false,
+            error: 'Erro ao extrair vídeo'
+          });
+          continue;
+        }
+
+        if (!data.success) {
+          extractedVideos.push({
+            ...data,
+            originalUrl: validUrls[i],
+            success: false,
+            error: data.error || 'Não foi possível extrair o vídeo'
+          });
+          continue;
+        }
+
+        extractedVideos.push(data);
       }
 
-      if (!data.success) {
-        toast.error(data.error || 'Não foi possível extrair o vídeo.');
-        setIsSubmitting(false);
-        setIsLoading(false);
-        return;
+      const successCount = extractedVideos.filter(v => v.success).length;
+      if (successCount === validUrls.length) {
+        toast.success(`${successCount} vídeo(s) extraído(s) com sucesso!`);
+      } else if (successCount > 0) {
+        toast.warning(`${successCount} de ${validUrls.length} vídeos extraídos.`);
+      } else {
+        toast.error('Nenhum vídeo foi extraído com sucesso.');
       }
 
-      toast.success('Vídeo extraído com sucesso!');
-      onSubmit(data);
+      onSubmit(extractedVideos);
     } catch (error) {
       console.error('Error:', error);
       toast.error('Erro inesperado. Tente novamente.');
@@ -71,50 +127,78 @@ export const SoraUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: SoraUrlI
     }
   };
 
+  const hasValidUrls = urls.some(url => url.trim().length > 0);
+
   return (
     <Card className="glass-card animate-slide-up">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-xl">
           <Sparkles className="w-5 h-5 text-primary" />
-          Baixar Vídeo do Sora 2.0
+          Baixar Vídeos do Sora 2.0
         </CardTitle>
         <p className="text-sm text-muted-foreground">
-          Cole o link de compartilhamento do Sora para baixar o vídeo
+          Cole os links de compartilhamento do Sora para baixar os vídeos (até 5)
         </p>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <div className="relative">
-              <Link className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                type="url"
-                placeholder="https://sora.chatgpt.com/p/s_..."
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                className="pl-10"
-                disabled={isLoading}
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Exemplo: https://sora.chatgpt.com/p/s_694309bcaa208191b60bfd2bee7f21c1
-            </p>
+          <div className="space-y-3">
+            {urls.map((url, index) => (
+              <div key={index} className="flex gap-2">
+                <div className="relative flex-1">
+                  <Link className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    type="url"
+                    placeholder={`URL do Sora ${index + 1}`}
+                    value={url}
+                    onChange={(e) => updateUrl(index, e.target.value)}
+                    className="pl-10"
+                    disabled={isLoading}
+                  />
+                </div>
+                {urls.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeUrl(index)}
+                    disabled={isLoading}
+                    className="shrink-0"
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
+            ))}
           </div>
+
+          {urls.length < 5 && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={addUrl}
+              disabled={isLoading}
+              className="w-full"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Adicionar mais URL
+            </Button>
+          )}
 
           <Button 
             type="submit" 
             className="w-full" 
-            disabled={isLoading || isSubmitting || !url.trim()}
+            disabled={isLoading || isSubmitting || !hasValidUrls}
           >
             {isLoading ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Extraindo...
+                Extraindo {currentIndex} de {totalToExtract}...
               </>
             ) : (
               <>
                 <Sparkles className="w-4 h-4 mr-2" />
-                Extrair Vídeo
+                Extrair Vídeos
               </>
             )}
           </Button>
@@ -125,7 +209,8 @@ export const SoraUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: SoraUrlI
           <ul className="text-xs text-muted-foreground space-y-1">
             <li>• Vá até sora.chatgpt.com e encontre o vídeo que deseja baixar</li>
             <li>• Clique em "Share" e copie o link</li>
-            <li>• Cole o link aqui e clique em "Extrair Vídeo"</li>
+            <li>• Cole o link aqui e clique em "Extrair Vídeos"</li>
+            <li>• Você pode baixar até 5 vídeos de uma vez</li>
           </ul>
         </div>
       </CardContent>

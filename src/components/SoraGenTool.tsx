@@ -19,18 +19,18 @@ export interface SoraVideoData {
 
 export const SoraGenTool = () => {
   const [currentStep, setCurrentStep] = useState<SoraStep>('input');
-  const [videoData, setVideoData] = useState<SoraVideoData | null>(null);
+  const [videos, setVideos] = useState<SoraVideoData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = async (data: SoraVideoData) => {
-    setVideoData(data);
+  const handleSubmit = async (data: SoraVideoData[]) => {
+    setVideos(data);
     setCurrentStep('result');
     setIsLoading(false);
   };
 
   const handleReset = () => {
     setCurrentStep('input');
-    setVideoData(null);
+    setVideos([]);
     setIsLoading(false);
   };
 
@@ -44,9 +44,9 @@ export const SoraGenTool = () => {
         />
       )}
 
-      {currentStep === 'result' && videoData && (
+      {currentStep === 'result' && videos.length > 0 && (
         <SoraResultStep
-          videoData={videoData}
+          videos={videos}
           onReset={handleReset}
         />
       )}
