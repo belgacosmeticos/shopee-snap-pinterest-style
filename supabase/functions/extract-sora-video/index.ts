@@ -199,6 +199,14 @@ function extractFromHtml(html: string, originalUrl: string): SoraVideoInfo | nul
 
 function decodeUnicode(str: string): string {
   return str
+    // HTML entities first
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    // Unicode escapes
     .replace(/\\u002F/g, '/')
     .replace(/\\u0026/g, '&')
     .replace(/\\u003C/g, '<')
@@ -247,8 +255,40 @@ serve(async (req) => {
   }
 
   try {
-    const { url } = await req.json();
+    const { url, action, videoUrl } = await req.json();
     
+    // Download proxy action - bypasses CORS
+    if (action === 'download' && videoUrl) {
+      console.log('[extract-sora-video] Download proxy for:', videoUrl);
+      
+      // Decode URL in case it has HTML entities
+      const cleanUrl = decodeUnicode(videoUrl);
+      
+      const videoResponse = await fetch(cleanUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+      });
+      
+      if (!videoResponse.ok) {
+        return new Response(
+          JSON.stringify({ success: false, error: `Failed to fetch video: ${videoResponse.status}` }),
+          { status: videoResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      const videoBlob = await videoResponse.arrayBuffer();
+      
+      return new Response(videoBlob, {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'video/mp4',
+          'Content-Disposition': `attachment; filename="sora-video-${Date.now()}.mp4"`,
+        },
+      });
+    }
+    
+    // Regular extraction
     if (!url) {
       return new Response(
         JSON.stringify({ success: false, error: 'URL é obrigatória' }),
