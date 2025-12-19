@@ -605,20 +605,45 @@ serve(async (req) => {
       
       const cleanUrl = decodeUnicode(videoUrl);
       
+      // Extract domain for Referer header
+      let referer = 'https://sora.chatgpt.com/';
+      try {
+        const urlObj = new URL(cleanUrl);
+        if (urlObj.hostname.includes('dyysy.com')) {
+          referer = 'https://sorasave.site/';
+        } else if (urlObj.hostname.includes('openai')) {
+          referer = 'https://sora.chatgpt.com/';
+        }
+      } catch {}
+      
       const videoResponse = await fetch(cleanUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': referer,
+          'Origin': referer.replace(/\/$/, ''),
+          'Sec-Fetch-Dest': 'video',
+          'Sec-Fetch-Mode': 'cors',
+          'Sec-Fetch-Site': 'cross-site',
         },
       });
       
       if (!videoResponse.ok) {
+        console.log('[extract-sora-video] Download failed, status:', videoResponse.status);
+        // Return the direct URL instead for client-side download
         return new Response(
-          JSON.stringify({ success: false, error: `Failed to fetch video: ${videoResponse.status}` }),
-          { status: videoResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ 
+            success: false, 
+            error: `Failed to fetch video: ${videoResponse.status}`,
+            directUrl: cleanUrl 
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
       
       const videoBlob = await videoResponse.arrayBuffer();
+      console.log('[extract-sora-video] Download success, size:', videoBlob.byteLength);
       
       return new Response(videoBlob, {
         headers: {
