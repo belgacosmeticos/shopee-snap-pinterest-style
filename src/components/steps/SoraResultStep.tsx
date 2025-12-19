@@ -84,12 +84,32 @@ export const SoraResultStep = ({ videos, onReset }: SoraResultStepProps) => {
         }
       );
 
+      const contentType = response.headers.get('content-type') || '';
+      
+      // Check if server returned JSON (fallback case)
+      if (contentType.includes('application/json')) {
+        const json = await response.json();
+        if (json.directUrl) {
+          // Server couldn't proxy, try direct download
+          toast.info('Tentando download direto...');
+          window.open(json.directUrl, '_blank');
+          return;
+        }
+        throw new Error(json.error || 'Download failed');
+      }
+
       if (!response.ok) {
         throw new Error(`Download failed: ${response.status}`);
       }
 
       // Get blob directly from response
       const blob = await response.blob();
+      
+      // Check if we got a valid video blob
+      if (blob.size < 1000) {
+        throw new Error('Invalid video response');
+      }
+      
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
