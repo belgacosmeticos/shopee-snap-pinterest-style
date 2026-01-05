@@ -60,3 +60,6 @@ verify_jwt = false
 
 [functions.extract-sora-video]
 verify_jwt = false
+
+[functions.process-video-metadata]
+verify_jwt = false

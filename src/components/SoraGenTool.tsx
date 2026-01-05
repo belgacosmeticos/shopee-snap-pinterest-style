@@ -21,6 +21,7 @@ export const SoraGenTool = () => {
   const [currentStep, setCurrentStep] = useState<SoraStep>('input');
   const [videos, setVideos] = useState<SoraVideoData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [cleanMetadata, setCleanMetadata] = useState(true);
 
   const handleSubmit = async (data: SoraVideoData[]) => {
     setVideos(data);
@@ -41,6 +42,8 @@ export const SoraGenTool = () => {
           onSubmit={handleSubmit} 
           isLoading={isLoading}
           setIsLoading={setIsLoading}
+          cleanMetadata={cleanMetadata}
+          setCleanMetadata={setCleanMetadata}
         />
       )}
 
@@ -48,6 +51,7 @@ export const SoraGenTool = () => {
         <SoraResultStep
           videos={videos}
           onReset={handleReset}
+          cleanMetadata={cleanMetadata}
         />
       )}
     </div>
