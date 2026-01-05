@@ -11,7 +11,9 @@ import {
   Link,
   AlertTriangle,
   ExternalLink,
-  XCircle
+  XCircle,
+  Loader2,
+  Smartphone
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -27,14 +29,24 @@ function decodeVideoUrl(url: string): string {
     .replace(/&#39;/g, "'");
 }
 
+// iPhone 16 Pro Max metadata for client-side injection
+const IPHONE_METADATA = {
+  make: 'Apple',
+  model: 'iPhone 16 Pro Max',
+  software: '18.4.1',
+};
+
 interface SoraResultStepProps {
   videos: SoraVideoData[];
   onReset: () => void;
+  cleanMetadata: boolean;
 }
 
-export const SoraResultStep = ({ videos, onReset }: SoraResultStepProps) => {
+export const SoraResultStep = ({ videos, onReset, cleanMetadata }: SoraResultStepProps) => {
   const [copiedPrompts, setCopiedPrompts] = useState<Record<number, boolean>>({});
   const [copiedLinks, setCopiedLinks] = useState<Record<number, boolean>>({});
+  const [downloadingIndex, setDownloadingIndex] = useState<number | null>(null);
+  const [processingMetadata, setProcessingMetadata] = useState(false);
 
   const handleCopyPrompt = async (index: number, prompt: string) => {
     try {
@@ -58,7 +70,7 @@ export const SoraResultStep = ({ videos, onReset }: SoraResultStepProps) => {
     }
   };
 
-  const handleDownload = async (video: SoraVideoData) => {
+  const handleDownload = async (video: SoraVideoData, index: number) => {
     const rawVideoUrl = video.videoUrlNoWatermark || video.videoUrl;
     
     if (!rawVideoUrl) {
@@ -67,9 +79,10 @@ export const SoraResultStep = ({ videos, onReset }: SoraResultStepProps) => {
     }
 
     const videoUrl = decodeVideoUrl(rawVideoUrl);
+    setDownloadingIndex(index);
 
     try {
-      toast.info('Iniciando download...');
+      toast.info('Baixando vídeo...');
       
       // Use fetch directly to handle binary data properly (SDK corrupts binary responses)
       const response = await fetch(
@@ -93,6 +106,7 @@ export const SoraResultStep = ({ videos, onReset }: SoraResultStepProps) => {
           // Server couldn't proxy, try direct download
           toast.info('Tentando download direto...');
           window.open(json.directUrl, '_blank');
+          setDownloadingIndex(null);
           return;
         }
         throw new Error(json.error || 'Download failed');
@@ -103,17 +117,68 @@ export const SoraResultStep = ({ videos, onReset }: SoraResultStepProps) => {
       }
 
       // Get blob directly from response
-      const blob = await response.blob();
+      let blob = await response.blob();
       
       // Check if we got a valid video blob
       if (blob.size < 1000) {
         throw new Error('Invalid video response');
       }
+
+      // Process metadata if enabled
+      if (cleanMetadata) {
+        setProcessingMetadata(true);
+        toast.info('Limpando metadados e adicionando iPhone 16 Pro Max...');
+        
+        try {
+          // Send to process-video-metadata edge function
+          const processResponse = await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-video-metadata`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+              },
+              body: JSON.stringify({ videoUrl }),
+            }
+          );
+
+          if (processResponse.ok) {
+            const processContentType = processResponse.headers.get('content-type') || '';
+            
+            if (processContentType.includes('video/')) {
+              // Got processed video directly
+              blob = await processResponse.blob();
+              toast.success('Metadados processados com sucesso!');
+            } else {
+              // Got JSON response with base64 video
+              const processData = await processResponse.json();
+              if (processData.success && processData.videoBase64) {
+                const binaryString = atob(processData.videoBase64);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                  bytes[i] = binaryString.charCodeAt(i);
+                }
+                blob = new Blob([bytes], { type: 'video/mp4' });
+                toast.success('Metadados limpos! (iPhone 16 Pro Max)');
+              }
+            }
+          }
+        } catch (processError) {
+          console.warn('Metadata processing failed, using original:', processError);
+          toast.warning('Não foi possível processar metadados, baixando original.');
+        }
+        
+        setProcessingMetadata(false);
+      }
       
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sora-video-${Date.now()}.mp4`;
+      const filename = cleanMetadata 
+        ? `sora-iphone-${Date.now()}.mp4`
+        : `sora-video-${Date.now()}.mp4`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -125,6 +190,9 @@ export const SoraResultStep = ({ videos, onReset }: SoraResultStepProps) => {
       // Fallback: open in new tab
       window.open(videoUrl, '_blank');
       toast.info('Abrindo vídeo em nova aba para download manual.');
+    } finally {
+      setDownloadingIndex(null);
+      setProcessingMetadata(false);
     }
   };
 
@@ -192,9 +260,26 @@ export const SoraResultStep = ({ videos, onReset }: SoraResultStepProps) => {
 
               {/* Action Buttons */}
               <div className="flex flex-wrap gap-2">
-                <Button onClick={() => handleDownload(video)} className="flex-1">
-                  <Download className="w-4 h-4 mr-2" />
-                  Baixar Vídeo
+                <Button 
+                  onClick={() => handleDownload(video, index)} 
+                  className="flex-1"
+                  disabled={downloadingIndex !== null}
+                >
+                  {downloadingIndex === index ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      {processingMetadata ? 'Processando...' : 'Baixando...'}
+                    </>
+                  ) : (
+                    <>
+                      {cleanMetadata ? (
+                        <Smartphone className="w-4 h-4 mr-2" />
+                      ) : (
+                        <Download className="w-4 h-4 mr-2" />
+                      )}
+                      {cleanMetadata ? 'Baixar (iPhone)' : 'Baixar Vídeo'}
+                    </>
+                  )}
                 </Button>
                 {videoLink && (
                   <Button variant="outline" onClick={() => handleCopyLink(index, videoLink)}>

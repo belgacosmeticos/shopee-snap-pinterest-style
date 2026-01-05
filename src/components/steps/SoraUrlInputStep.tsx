@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Sparkles, Link, Loader2, Plus, X } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Sparkles, Link, Loader2, Plus, X, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { SoraVideoData } from '../SoraGenTool';
@@ -11,9 +12,11 @@ interface SoraUrlInputStepProps {
   onSubmit: (data: SoraVideoData[]) => void;
   isLoading: boolean;
   setIsLoading: (loading: boolean) => void;
+  cleanMetadata: boolean;
+  setCleanMetadata: (clean: boolean) => void;
 }
 
-export const SoraUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: SoraUrlInputStepProps) => {
+export const SoraUrlInputStep = ({ onSubmit, isLoading, setIsLoading, cleanMetadata, setCleanMetadata }: SoraUrlInputStepProps) => {
   const [urls, setUrls] = useState<string[]>(['', '', '']);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -185,7 +188,25 @@ export const SoraUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: SoraUrlI
             </Button>
           )}
 
-          <Button 
+          {/* iPhone Metadata Toggle */}
+          <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/30">
+            <div className="flex items-center gap-3">
+              <Smartphone className="w-5 h-5 text-primary" />
+              <div>
+                <h4 className="font-medium text-sm">Metadados iPhone</h4>
+                <p className="text-xs text-muted-foreground">
+                  Remove marcas de IA e adiciona metadados de iPhone 16 Pro Max
+                </p>
+              </div>
+            </div>
+            <Switch 
+              checked={cleanMetadata} 
+              onCheckedChange={setCleanMetadata}
+              disabled={isLoading}
+            />
+          </div>
+
+          <Button
             type="submit" 
             className="w-full" 
             disabled={isLoading || isSubmitting || !hasValidUrls}
