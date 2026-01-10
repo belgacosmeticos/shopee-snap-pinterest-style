@@ -18,8 +18,8 @@ import {
   AlertCircle,
   Video,
   CheckCircle2,
-  Youtube,
   Instagram,
+  Facebook,
 } from 'lucide-react';
 import type { MineResult, VideoResult } from '../VideoMinerTool';
 import { toast } from 'sonner';
@@ -29,7 +29,7 @@ interface VideoMinerResultStepProps {
   onReset: () => void;
 }
 
-type SourceFilter = 'all' | 'shopee' | 'aliexpress' | 'pinterest' | 'tiktok' | 'youtube' | 'instagram';
+type SourceFilter = 'all' | 'shopee' | 'aliexpress' | 'pinterest' | 'tiktok' | 'instagram' | 'facebook';
 
 export const VideoMinerResultStep = ({ result, onReset }: VideoMinerResultStepProps) => {
   const [selectedVideos, setSelectedVideos] = useState<Set<string>>(new Set());
@@ -51,10 +51,10 @@ export const VideoMinerResultStep = ({ result, onReset }: VideoMinerResultStepPr
         return <Pin className="w-4 h-4" />;
       case 'tiktok':
         return <Music className="w-4 h-4" />;
-      case 'youtube':
-        return <Youtube className="w-4 h-4" />;
       case 'instagram':
         return <Instagram className="w-4 h-4" />;
+      case 'facebook':
+        return <Facebook className="w-4 h-4" />;
       default:
         return <Video className="w-4 h-4" />;
     }
@@ -70,10 +70,10 @@ export const VideoMinerResultStep = ({ result, onReset }: VideoMinerResultStepPr
         return 'Pinterest';
       case 'tiktok':
         return 'TikTok';
-      case 'youtube':
-        return 'YouTube';
       case 'instagram':
         return 'Instagram';
+      case 'facebook':
+        return 'Facebook Ads';
       default:
         return source;
     }
@@ -89,10 +89,10 @@ export const VideoMinerResultStep = ({ result, onReset }: VideoMinerResultStepPr
         return 'bg-red-600/20 text-red-500 border-red-600/30';
       case 'tiktok':
         return 'bg-pink-500/20 text-pink-400 border-pink-500/30';
-      case 'youtube':
-        return 'bg-red-500/20 text-red-500 border-red-500/30';
       case 'instagram':
         return 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 text-pink-400 border-pink-500/30';
+      case 'facebook':
+        return 'bg-blue-600/20 text-blue-400 border-blue-600/30';
       default:
         return 'bg-muted text-muted-foreground border-muted';
     }
