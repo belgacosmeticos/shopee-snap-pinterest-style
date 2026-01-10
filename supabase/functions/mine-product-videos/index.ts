@@ -140,9 +140,114 @@ interface ProductInfo {
   shopId?: string;
 }
 
+// Generate SHA-256 signature for Shopee Affiliate API
+async function generateShopeeSignature(
+  appId: string,
+  timestamp: number,
+  payload: string,
+  secret: string
+): Promise<string> {
+  const signatureString = `${appId}${timestamp}${payload}${secret}`;
+  const encoder = new TextEncoder();
+  const data = encoder.encode(signatureString);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Get product info from Shopee Affiliate API (authenticated, works from servers)
+async function getProductFromAffiliateApi(
+  itemId: string,
+  shopId: string
+): Promise<{ name: string; keywords: string[] } | null> {
+  const appId = Deno.env.get('SHOPEE_APP_ID');
+  const appSecret = Deno.env.get('SHOPEE_APP_SECRET');
+
+  if (!appId || !appSecret) {
+    console.log('❌ Shopee Affiliate API credentials not configured');
+    return null;
+  }
+
+  console.log('🔄 Trying Shopee Affiliate API for product info...');
+
+  try {
+    const timestamp = Math.floor(Date.now() / 1000);
+
+    // Query products from the shop
+    const graphqlQuery = {
+      query: `query {
+        productOfferV2(
+          shopId: ${shopId}
+          listType: 0
+          sortType: 1
+          page: 0
+          limit: 50
+        ) {
+          nodes {
+            productName
+            productLink
+            itemId
+          }
+        }
+      }`
+    };
+
+    const payload = JSON.stringify(graphqlQuery);
+    const signature = await generateShopeeSignature(appId, timestamp, payload, appSecret);
+
+    const response = await fetch('https://open-api.affiliate.shopee.com.br/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${signature}`,
+      },
+      body: payload,
+    });
+
+    if (!response.ok) {
+      console.log(`❌ Affiliate API returned ${response.status}`);
+      const errorText = await response.text();
+      console.log('Error response:', errorText);
+      return null;
+    }
+
+    const data = await response.json();
+    console.log('📦 Affiliate API response:', JSON.stringify(data).slice(0, 500));
+
+    const products = data.data?.productOfferV2?.nodes || [];
+
+    // Try to find exact product by itemId
+    let exactProduct = products.find((p: any) =>
+      p.itemId?.toString() === itemId || 
+      (p.productLink && p.productLink.includes(itemId))
+    );
+
+    // If not found by exact match, use first product from the shop
+    if (!exactProduct && products.length > 0) {
+      console.log('⚠️ Exact product not found, using first product from shop');
+      exactProduct = products[0];
+    }
+
+    if (exactProduct?.productName) {
+      console.log('✅ Got product from Affiliate API:', exactProduct.productName);
+      return {
+        name: exactProduct.productName,
+        keywords: generateKeywords(exactProduct.productName)
+      };
+    }
+
+    console.log('❌ No product found in Affiliate API response');
+    return null;
+  } catch (error) {
+    console.error('❌ Affiliate API error:', error);
+    return null;
+  }
+}
+
 async function tryShopeeApiForProductInfo(itemId: string, shopId: string): Promise<{ name: string; keywords: string[] } | null> {
   console.log('🔄 Trying Shopee API for product info:', { itemId, shopId });
-  
+
+  // First try public APIs (usually blocked from servers but worth trying)
   const endpoints = [
     `https://shopee.com.br/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`,
     `https://shopee.com.br/api/v4/pdp/get_pc?item_id=${itemId}&shop_id=${shopId}`,
@@ -151,18 +256,17 @@ async function tryShopeeApiForProductInfo(itemId: string, shopId: string): Promi
   const userAgents = [
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
     'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   ];
 
   for (const endpoint of endpoints) {
     for (const userAgent of userAgents) {
       try {
-        console.log(`📡 Trying: ${endpoint}`);
+        console.log(`📡 Trying public API: ${endpoint}`);
         const response = await fetch(endpoint, {
           headers: {
             'User-Agent': userAgent,
             'Accept': 'application/json',
-            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Language': 'pt-BR,pt;q=0.9',
             'x-shopee-language': 'pt-BR',
             'x-api-source': 'pc',
             'Referer': 'https://shopee.com.br/',
@@ -170,7 +274,7 @@ async function tryShopeeApiForProductInfo(itemId: string, shopId: string): Promi
         });
 
         if (!response.ok) {
-          console.log(`❌ API returned ${response.status}`);
+          console.log(`❌ Public API returned ${response.status}`);
           continue;
         }
 
@@ -179,18 +283,26 @@ async function tryShopeeApiForProductInfo(itemId: string, shopId: string): Promi
         const name = itemData?.name || itemData?.title || itemData?.item?.name || itemData?.item?.title;
 
         if (name && name.length > 3) {
-          console.log('✅ Got product name from API:', name);
+          console.log('✅ Got product name from public API:', name);
           return {
             name,
             keywords: generateKeywords(name)
           };
         }
       } catch (e) {
-        console.error('API attempt failed:', e);
+        console.error('Public API attempt failed:', e);
       }
     }
   }
-  
+
+  console.log('❌ Public APIs failed, trying Affiliate API...');
+
+  // Fallback to Affiliate API (authenticated, more reliable)
+  const affiliateResult = await getProductFromAffiliateApi(itemId, shopId);
+  if (affiliateResult) {
+    return affiliateResult;
+  }
+
   console.log('❌ All API attempts failed');
   return null;
 }
