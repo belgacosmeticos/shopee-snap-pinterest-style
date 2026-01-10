@@ -7,7 +7,7 @@ const corsHeaders = {
 
 interface VideoResult {
   id: string;
-  source: 'shopee' | 'aliexpress' | 'pinterest' | 'tiktok';
+  source: 'shopee' | 'aliexpress' | 'pinterest' | 'youtube';
   videoUrl: string;
   thumbnailUrl: string;
   title: string;
@@ -22,6 +22,13 @@ interface MineResult {
   keywords: string[];
   videos: VideoResult[];
   errors?: string[];
+}
+
+interface ProductInfo {
+  name: string;
+  keywords: string[];
+  itemId?: string;
+  shopId?: string;
 }
 
 serve(async (req) => {
@@ -58,52 +65,66 @@ serve(async (req) => {
       );
     }
 
-    // Step 2: Search videos in parallel from enabled sources
-    const searchPromises: Promise<VideoResult[]>[] = [];
+    // Step 2: Search videos using NEW multi-layer approach
     const errors: string[] = [];
+    const allVideos: VideoResult[] = [];
 
+    // LAYER 1: Shopee Shop Videos (via Affiliate API)
+    if (sources?.shopee !== false && productInfo.shopId) {
+      try {
+        console.log('🛒 LAYER 1: Searching Shopee shop videos...');
+        const shopeeShopVideos = await searchShopeeShopVideos(productInfo.shopId, productInfo.itemId);
+        allVideos.push(...shopeeShopVideos);
+        console.log(`✅ Layer 1: Found ${shopeeShopVideos.length} videos from shop`);
+      } catch (err) {
+        console.error('Layer 1 error:', err);
+        errors.push('Erro ao buscar vídeos da loja Shopee');
+      }
+    }
+
+    // LAYER 2: Shopee Video Search (internal API + extract-shopee-video)
     if (sources?.shopee !== false) {
-      searchPromises.push(
-        searchShopeeVideos(productInfo.keywords, url)
-          .catch(err => {
-            console.error('Shopee search error:', err);
-            errors.push('Erro ao buscar vídeos na Shopee');
-            return [];
-          })
-      );
+      try {
+        console.log('🔍 LAYER 2: Searching Shopee videos by keyword...');
+        const shopeeSearchVideos = await searchShopeeVideosByKeyword(productInfo.keywords);
+        allVideos.push(...shopeeSearchVideos);
+        console.log(`✅ Layer 2: Found ${shopeeSearchVideos.length} videos from search`);
+      } catch (err) {
+        console.error('Layer 2 error:', err);
+        errors.push('Erro ao buscar vídeos na pesquisa Shopee');
+      }
     }
 
+    // LAYER 3: YouTube Videos (via search scraping)
+    try {
+      console.log('📺 LAYER 3: Searching YouTube videos...');
+      const youtubeVideos = await searchYouTubeVideos(productInfo.keywords);
+      allVideos.push(...youtubeVideos);
+      console.log(`✅ Layer 3: Found ${youtubeVideos.length} videos from YouTube`);
+    } catch (err) {
+      console.error('Layer 3 error:', err);
+      errors.push('Erro ao buscar vídeos no YouTube');
+    }
+
+    // LAYER 4: AliExpress Videos (via Google site search)
     if (sources?.aliexpress !== false) {
-      searchPromises.push(
-        searchAliExpressVideos(productInfo.keywords)
-          .catch(err => {
-            console.error('AliExpress search error:', err);
-            errors.push('Erro ao buscar vídeos no AliExpress');
-            return [];
-          })
-      );
+      try {
+        console.log('📦 LAYER 4: Searching AliExpress videos...');
+        const aliexpressVideos = await searchAliExpressVideos(productInfo.keywords);
+        allVideos.push(...aliexpressVideos);
+        console.log(`✅ Layer 4: Found ${aliexpressVideos.length} videos from AliExpress`);
+      } catch (err) {
+        console.error('Layer 4 error:', err);
+        errors.push('Erro ao buscar vídeos no AliExpress');
+      }
     }
-
-    if (sources?.pinterest !== false) {
-      searchPromises.push(
-        searchPinterestVideos(productInfo.keywords)
-          .catch(err => {
-            console.error('Pinterest search error:', err);
-            errors.push('Erro ao buscar vídeos no Pinterest');
-            return [];
-          })
-      );
-    }
-
-    const results = await Promise.all(searchPromises);
-    const allVideos = results.flat();
 
     // Remove duplicates by videoUrl
     const uniqueVideos = allVideos.filter((video, index, self) => 
       index === self.findIndex(v => v.videoUrl === video.videoUrl)
     );
 
-    console.log(`✅ Found ${uniqueVideos.length} unique videos`);
+    console.log(`✅ Total: Found ${uniqueVideos.length} unique videos`);
 
     const result: MineResult = {
       success: true,
@@ -133,12 +154,7 @@ serve(async (req) => {
   }
 });
 
-interface ProductInfo {
-  name: string;
-  keywords: string[];
-  itemId?: string;
-  shopId?: string;
-}
+// ========== HELPER FUNCTIONS ==========
 
 // Generate SHA-256 signature for Shopee Affiliate API
 async function generateShopeeSignature(
@@ -155,157 +171,40 @@ async function generateShopeeSignature(
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Get product info from Shopee Affiliate API (authenticated, works from servers)
-async function getProductFromAffiliateApi(
-  itemId: string,
-  shopId: string
-): Promise<{ name: string; keywords: string[] } | null> {
-  const appId = Deno.env.get('SHOPEE_APP_ID');
-  const appSecret = Deno.env.get('SHOPEE_APP_SECRET');
+function generateKeywords(productName: string): string[] {
+  if (!productName) return [];
 
-  if (!appId || !appSecret) {
-    console.log('❌ Shopee Affiliate API credentials not configured');
-    return null;
-  }
+  // Clean and normalize
+  const cleaned = productName
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remove accents
+    .replace(/[^\w\s]/g, ' ') // Remove special chars
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  console.log('🔄 Trying Shopee Affiliate API for product info...');
+  // Common words to remove (stopwords in Portuguese)
+  const stopwords = new Set([
+    'de', 'para', 'com', 'em', 'um', 'uma', 'e', 'ou', 'a', 'o', 'da', 'do', 'das', 'dos',
+    'na', 'no', 'nas', 'nos', 'por', 'ao', 'aos', 'pelo', 'pela', 'pelos', 'pelas',
+    'kit', 'pcs', 'unidades', 'unidade', 'pacote', 'conjunto', 'promocao', 'promo',
+    'frete', 'gratis', 'oferta', 'original', 'novo', 'nova', 'qualidade', 'premium'
+  ]);
 
-  try {
-    const timestamp = Math.floor(Date.now() / 1000);
+  // Extract meaningful keywords
+  const words = cleaned.split(' ')
+    .filter(w => w.length > 2 && !stopwords.has(w));
 
-    // Query products from the shop
-    const graphqlQuery = {
-      query: `query {
-        productOfferV2(
-          shopId: ${shopId}
-          listType: 0
-          sortType: 1
-          page: 0
-          limit: 50
-        ) {
-          nodes {
-            productName
-            productLink
-            itemId
-          }
-        }
-      }`
-    };
+  // Take first 5 most relevant words
+  const keywords = words.slice(0, 5);
 
-    const payload = JSON.stringify(graphqlQuery);
-    const signature = await generateShopeeSignature(appId, timestamp, payload, appSecret);
+  // Also create a combined search term
+  const mainKeyword = keywords.slice(0, 3).join(' ');
 
-    const response = await fetch('https://open-api.affiliate.shopee.com.br/graphql', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${signature}`,
-      },
-      body: payload,
-    });
-
-    if (!response.ok) {
-      console.log(`❌ Affiliate API returned ${response.status}`);
-      const errorText = await response.text();
-      console.log('Error response:', errorText);
-      return null;
-    }
-
-    const data = await response.json();
-    console.log('📦 Affiliate API response:', JSON.stringify(data).slice(0, 500));
-
-    const products = data.data?.productOfferV2?.nodes || [];
-
-    // Try to find exact product by itemId
-    let exactProduct = products.find((p: any) =>
-      p.itemId?.toString() === itemId || 
-      (p.productLink && p.productLink.includes(itemId))
-    );
-
-    // If not found by exact match, use first product from the shop
-    if (!exactProduct && products.length > 0) {
-      console.log('⚠️ Exact product not found, using first product from shop');
-      exactProduct = products[0];
-    }
-
-    if (exactProduct?.productName) {
-      console.log('✅ Got product from Affiliate API:', exactProduct.productName);
-      return {
-        name: exactProduct.productName,
-        keywords: generateKeywords(exactProduct.productName)
-      };
-    }
-
-    console.log('❌ No product found in Affiliate API response');
-    return null;
-  } catch (error) {
-    console.error('❌ Affiliate API error:', error);
-    return null;
-  }
+  return [mainKeyword, ...keywords].filter(Boolean);
 }
 
-async function tryShopeeApiForProductInfo(itemId: string, shopId: string): Promise<{ name: string; keywords: string[] } | null> {
-  console.log('🔄 Trying Shopee API for product info:', { itemId, shopId });
-
-  // First try public APIs (usually blocked from servers but worth trying)
-  const endpoints = [
-    `https://shopee.com.br/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`,
-    `https://shopee.com.br/api/v4/pdp/get_pc?item_id=${itemId}&shop_id=${shopId}`,
-  ];
-
-  const userAgents = [
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-    'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-  ];
-
-  for (const endpoint of endpoints) {
-    for (const userAgent of userAgents) {
-      try {
-        console.log(`📡 Trying public API: ${endpoint}`);
-        const response = await fetch(endpoint, {
-          headers: {
-            'User-Agent': userAgent,
-            'Accept': 'application/json',
-            'Accept-Language': 'pt-BR,pt;q=0.9',
-            'x-shopee-language': 'pt-BR',
-            'x-api-source': 'pc',
-            'Referer': 'https://shopee.com.br/',
-          },
-        });
-
-        if (!response.ok) {
-          console.log(`❌ Public API returned ${response.status}`);
-          continue;
-        }
-
-        const data = await response.json();
-        const itemData = data.data || data.item || data;
-        const name = itemData?.name || itemData?.title || itemData?.item?.name || itemData?.item?.title;
-
-        if (name && name.length > 3) {
-          console.log('✅ Got product name from public API:', name);
-          return {
-            name,
-            keywords: generateKeywords(name)
-          };
-        }
-      } catch (e) {
-        console.error('Public API attempt failed:', e);
-      }
-    }
-  }
-
-  console.log('❌ Public APIs failed, trying Affiliate API...');
-
-  // Fallback to Affiliate API (authenticated, more reliable)
-  const affiliateResult = await getProductFromAffiliateApi(itemId, shopId);
-  if (affiliateResult) {
-    return affiliateResult;
-  }
-
-  console.log('❌ All API attempts failed');
-  return null;
-}
+// ========== PRODUCT INFO EXTRACTION ==========
 
 async function extractProductInfo(url: string): Promise<ProductInfo> {
   console.log('📋 Extracting product info from:', url);
@@ -371,10 +270,10 @@ async function extractProductInfo(url: string): Promise<ProductInfo> {
       } catch {}
     }
 
-    // NEW: If no product name but we have IDs, try Shopee API
+    // If no product name but we have IDs, try Shopee Affiliate API
     if (!productName && itemId && shopId) {
-      console.log('🔄 No product name found, trying Shopee API...');
-      const apiResult = await tryShopeeApiForProductInfo(itemId, shopId);
+      console.log('🔄 No product name found, trying Shopee Affiliate API...');
+      const apiResult = await getProductFromAffiliateApi(itemId, shopId);
       if (apiResult) {
         return {
           name: apiResult.name,
@@ -404,54 +303,234 @@ async function extractProductInfo(url: string): Promise<ProductInfo> {
   }
 }
 
-function generateKeywords(productName: string): string[] {
-  if (!productName) return [];
+// Get product info from Shopee Affiliate API (authenticated, works from servers)
+async function getProductFromAffiliateApi(
+  itemId: string,
+  shopId: string
+): Promise<{ name: string; keywords: string[] } | null> {
+  const appId = Deno.env.get('SHOPEE_APP_ID');
+  const appSecret = Deno.env.get('SHOPEE_APP_SECRET');
 
-  // Clean and normalize
-  const cleaned = productName
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // Remove accents
-    .replace(/[^\w\s]/g, ' ') // Remove special chars
-    .replace(/\s+/g, ' ')
-    .trim();
+  if (!appId || !appSecret) {
+    console.log('❌ Shopee Affiliate API credentials not configured');
+    return null;
+  }
 
-  // Common words to remove (stopwords in Portuguese)
-  const stopwords = new Set([
-    'de', 'para', 'com', 'em', 'um', 'uma', 'e', 'ou', 'a', 'o', 'da', 'do', 'das', 'dos',
-    'na', 'no', 'nas', 'nos', 'por', 'ao', 'aos', 'pelo', 'pela', 'pelos', 'pelas',
-    'kit', 'pcs', 'unidades', 'unidade', 'pacote', 'conjunto', 'promocao', 'promo',
-    'frete', 'gratis', 'oferta', 'original', 'novo', 'nova', 'qualidade', 'premium'
-  ]);
+  console.log('🔄 Trying Shopee Affiliate API for product info...');
 
-  // Extract meaningful keywords
-  const words = cleaned.split(' ')
-    .filter(w => w.length > 2 && !stopwords.has(w));
+  try {
+    const timestamp = Math.floor(Date.now() / 1000);
 
-  // Take first 5 most relevant words
-  const keywords = words.slice(0, 5);
+    // Query products from the shop
+    const graphqlQuery = {
+      query: `query {
+        productOfferV2(
+          shopId: ${shopId}
+          listType: 0
+          sortType: 1
+          page: 0
+          limit: 50
+        ) {
+          nodes {
+            productName
+            productLink
+            itemId
+          }
+        }
+      }`
+    };
 
-  // Also create a combined search term
-  const mainKeyword = keywords.slice(0, 3).join(' ');
+    const payload = JSON.stringify(graphqlQuery);
+    const signature = await generateShopeeSignature(appId, timestamp, payload, appSecret);
 
-  return [mainKeyword, ...keywords].filter(Boolean);
+    const response = await fetch('https://open-api.affiliate.shopee.com.br/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${signature}`,
+      },
+      body: payload,
+    });
+
+    if (!response.ok) {
+      console.log(`❌ Affiliate API returned ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    console.log('📦 Affiliate API response:', JSON.stringify(data).slice(0, 500));
+
+    const products = data.data?.productOfferV2?.nodes || [];
+
+    // Try to find exact product by itemId
+    let exactProduct = products.find((p: any) =>
+      p.itemId?.toString() === itemId || 
+      (p.productLink && p.productLink.includes(itemId))
+    );
+
+    // If not found by exact match, use first product from the shop
+    if (!exactProduct && products.length > 0) {
+      console.log('⚠️ Exact product not found, using first product from shop');
+      exactProduct = products[0];
+    }
+
+    if (exactProduct?.productName) {
+      console.log('✅ Got product from Affiliate API:', exactProduct.productName);
+      return {
+        name: exactProduct.productName,
+        keywords: generateKeywords(exactProduct.productName)
+      };
+    }
+
+    return null;
+  } catch (error) {
+    console.error('❌ Affiliate API error:', error);
+    return null;
+  }
 }
 
-async function searchShopeeVideos(keywords: string[], originalUrl: string): Promise<VideoResult[]> {
-  console.log('🛒 Searching Shopee videos for:', keywords);
+// ========== LAYER 1: SHOPEE SHOP VIDEOS ==========
+// Busca vídeos de produtos da mesma loja via Affiliate API
+
+async function searchShopeeShopVideos(shopId: string, currentItemId?: string): Promise<VideoResult[]> {
+  console.log('🛒 Layer 1: Searching videos from shop:', shopId);
   const videos: VideoResult[] = [];
-  
+
+  const appId = Deno.env.get('SHOPEE_APP_ID');
+  const appSecret = Deno.env.get('SHOPEE_APP_SECRET');
+
+  if (!appId || !appSecret) {
+    console.log('⚠️ Shopee Affiliate API not configured');
+    return videos;
+  }
+
+  try {
+    const timestamp = Math.floor(Date.now() / 1000);
+
+    // Query products from the shop
+    const graphqlQuery = {
+      query: `query {
+        productOfferV2(
+          shopId: ${shopId}
+          listType: 0
+          sortType: 1
+          page: 0
+          limit: 20
+        ) {
+          nodes {
+            productName
+            productLink
+            itemId
+            imageUrl
+          }
+        }
+      }`
+    };
+
+    const payload = JSON.stringify(graphqlQuery);
+    const signature = await generateShopeeSignature(appId, timestamp, payload, appSecret);
+
+    const response = await fetch('https://open-api.affiliate.shopee.com.br/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${signature}`,
+      },
+      body: payload,
+    });
+
+    if (!response.ok) {
+      console.log(`❌ Affiliate API returned ${response.status}`);
+      return videos;
+    }
+
+    const data = await response.json();
+    const products = data.data?.productOfferV2?.nodes || [];
+
+    console.log(`📦 Found ${products.length} products from shop`);
+
+    // For each product, try to extract video via our extract-shopee-video function
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SUPABASE_ANON_KEY');
+
+    if (!supabaseUrl || !supabaseKey) {
+      console.log('⚠️ Supabase credentials not available for calling extract-shopee-video');
+      return videos;
+    }
+
+    // Try up to 5 products (excluding current one)
+    const productsToTry = products
+      .filter((p: any) => p.productLink && p.itemId?.toString() !== currentItemId)
+      .slice(0, 5);
+
+    for (const product of productsToTry) {
+      try {
+        console.log(`🔍 Trying to extract video from: ${product.productName?.slice(0, 50)}...`);
+        
+        const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-shopee-video`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ url: product.productLink }),
+        });
+
+        if (extractResponse.ok) {
+          const videoInfo = await extractResponse.json();
+          
+          if (videoInfo.videoUrl || videoInfo.videoUrlNoWatermark) {
+            videos.push({
+              id: `shopee_shop_${product.itemId || Date.now()}`,
+              source: 'shopee',
+              videoUrl: videoInfo.videoUrlNoWatermark || videoInfo.videoUrl,
+              thumbnailUrl: videoInfo.thumbnailUrl || product.imageUrl || '',
+              title: product.productName || 'Vídeo Shopee',
+              sourceUrl: product.productLink,
+            });
+            console.log(`✅ Found video for product: ${product.productName?.slice(0, 30)}...`);
+          }
+        }
+      } catch (err) {
+        console.error('Error extracting video:', err);
+      }
+    }
+
+  } catch (error) {
+    console.error('Layer 1 error:', error);
+  }
+
+  return videos;
+}
+
+// ========== LAYER 2: SHOPEE KEYWORD SEARCH ==========
+// Busca vídeos por palavra-chave usando Firecrawl + extract-shopee-video
+
+async function searchShopeeVideosByKeyword(keywords: string[]): Promise<VideoResult[]> {
+  console.log('🔍 Layer 2: Searching Shopee videos by keyword:', keywords);
+  const videos: VideoResult[] = [];
+
   const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY');
   if (!firecrawlKey) {
-    console.log('⚠️ FIRECRAWL_API_KEY not configured, skipping Shopee search');
+    console.log('⚠️ FIRECRAWL_API_KEY not configured');
+    return videos;
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SUPABASE_ANON_KEY');
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.log('⚠️ Supabase credentials not available');
     return videos;
   }
 
   try {
     const searchQuery = keywords[0] || keywords.join(' ');
-    const searchUrl = `https://shopee.com.br/search?keyword=${encodeURIComponent(searchQuery)}`;
-
-    console.log('🔍 Scraping Shopee search:', searchUrl);
+    
+    // Strategy 1: Try Shopee Video tab (sv.shopee URLs)
+    const videoSearchUrl = `https://shopee.com.br/search?keyword=${encodeURIComponent(searchQuery)}&type=video`;
+    
+    console.log('🔍 Searching Shopee videos:', videoSearchUrl);
 
     const scrapeResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
       method: 'POST',
@@ -460,7 +539,119 @@ async function searchShopeeVideos(keywords: string[], originalUrl: string): Prom
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        url: searchUrl,
+        url: videoSearchUrl,
+        formats: ['html'],
+        waitFor: 5000,
+        timeout: 30000,
+      }),
+    });
+
+    if (!scrapeResponse.ok) {
+      console.error('Firecrawl error:', scrapeResponse.status);
+      return videos;
+    }
+
+    const scrapeData = await scrapeResponse.json();
+    const html = scrapeData.data?.html || '';
+
+    // Extract sv.shopee video URLs
+    const videoLinkPatterns = [
+      /https?:\/\/sv\.shopee\.com\.br\/[^\s"'<>]+/gi,
+      /https?:\/\/shopee\.com\.br\/share-video[^\s"'<>]+/gi,
+      /https?:\/\/s\.shopee\.com\.br\/[A-Za-z0-9]+/gi,
+    ];
+
+    const foundLinks: string[] = [];
+    for (const pattern of videoLinkPatterns) {
+      const matches = html.match(pattern);
+      if (matches) {
+        for (const link of matches) {
+          if (!foundLinks.includes(link) && foundLinks.length < 10) {
+            foundLinks.push(link);
+          }
+        }
+      }
+    }
+
+    // Also extract regular product links that might have videos
+    const productLinkMatches = html.matchAll(/href="([^"]*-i\.\d+\.\d+[^"]*)"/g);
+    for (const match of productLinkMatches) {
+      const link = match[1].startsWith('http') ? match[1] : `https://shopee.com.br${match[1]}`;
+      if (!foundLinks.includes(link) && foundLinks.length < 15) {
+        foundLinks.push(link);
+      }
+    }
+
+    console.log(`📦 Found ${foundLinks.length} potential video links`);
+
+    // Try to extract videos from each link
+    for (const link of foundLinks.slice(0, 8)) {
+      try {
+        console.log(`🔍 Extracting video from: ${link.slice(0, 80)}...`);
+        
+        const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-shopee-video`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ url: link }),
+        });
+
+        if (extractResponse.ok) {
+          const videoInfo = await extractResponse.json();
+          
+          if (videoInfo.videoUrl || videoInfo.videoUrlNoWatermark) {
+            videos.push({
+              id: `shopee_search_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+              source: 'shopee',
+              videoUrl: videoInfo.videoUrlNoWatermark || videoInfo.videoUrl,
+              thumbnailUrl: videoInfo.thumbnailUrl || '',
+              title: videoInfo.title || videoInfo.description || `Vídeo Shopee - ${searchQuery}`,
+              sourceUrl: link,
+            });
+            console.log(`✅ Found video from search`);
+          }
+        }
+      } catch (err) {
+        console.error('Error extracting video:', err);
+      }
+    }
+
+  } catch (error) {
+    console.error('Layer 2 error:', error);
+  }
+
+  return videos;
+}
+
+// ========== LAYER 3: YOUTUBE VIDEOS ==========
+// Busca vídeos de review/unboxing no YouTube
+
+async function searchYouTubeVideos(keywords: string[]): Promise<VideoResult[]> {
+  console.log('📺 Layer 3: Searching YouTube videos:', keywords);
+  const videos: VideoResult[] = [];
+
+  const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY');
+  if (!firecrawlKey) {
+    console.log('⚠️ FIRECRAWL_API_KEY not configured');
+    return videos;
+  }
+
+  try {
+    const searchQuery = `${keywords[0] || keywords.join(' ')} review unboxing`;
+    const youtubeUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`;
+
+    console.log('🔍 Searching YouTube:', youtubeUrl);
+
+    const scrapeResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${firecrawlKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        url: youtubeUrl,
         formats: ['html'],
         waitFor: 3000,
         timeout: 30000,
@@ -468,68 +659,78 @@ async function searchShopeeVideos(keywords: string[], originalUrl: string): Prom
     });
 
     if (!scrapeResponse.ok) {
-      console.error('Firecrawl Shopee error:', scrapeResponse.status);
+      console.error('Firecrawl YouTube error:', scrapeResponse.status);
       return videos;
     }
 
     const scrapeData = await scrapeResponse.json();
     const html = scrapeData.data?.html || '';
 
-    // Extract product links from search results
-    const productLinks: string[] = [];
-    const linkMatches = html.matchAll(/href="([^"]*-i\.\d+\.\d+[^"]*)"/g);
-    for (const match of linkMatches) {
-      const link = match[1].startsWith('http') ? match[1] : `https://shopee.com.br${match[1]}`;
-      if (!productLinks.includes(link) && productLinks.length < 5) {
-        productLinks.push(link);
+    // Extract YouTube video IDs from various patterns
+    const videoIdPatterns = [
+      /\/watch\?v=([a-zA-Z0-9_-]{11})/g,
+      /"videoId":\s*"([a-zA-Z0-9_-]{11})"/g,
+      /\/embed\/([a-zA-Z0-9_-]{11})/g,
+    ];
+
+    const foundVideoIds: string[] = [];
+    for (const pattern of videoIdPatterns) {
+      const matches = html.matchAll(pattern);
+      for (const match of matches) {
+        if (!foundVideoIds.includes(match[1]) && foundVideoIds.length < 10) {
+          foundVideoIds.push(match[1]);
+        }
       }
     }
 
-    console.log(`📦 Found ${productLinks.length} product links`);
+    console.log(`📹 Found ${foundVideoIds.length} YouTube video IDs`);
 
-    // For each product, try to extract video
-    for (const productLink of productLinks.slice(0, 3)) {
-      try {
-        const productHtml = await scrapeProductForVideo(productLink, firecrawlKey);
-        const videoUrls = extractVideoUrls(productHtml, 'shopee');
-        
-        for (const videoUrl of videoUrls) {
-          videos.push({
-            id: `shopee_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            source: 'shopee',
-            videoUrl,
-            thumbnailUrl: videoUrl.replace(/\.(mp4|webm|mov)$/i, '.jpg'),
-            title: `Vídeo Shopee`,
-            sourceUrl: productLink,
-          });
-        }
-      } catch (e) {
-        console.error('Error scraping product:', e);
-      }
+    // Extract titles for the videos
+    const titleMatches = html.matchAll(/"title":\s*\{"runs":\s*\[\{"text":\s*"([^"]+)"\}\]/g);
+    const titles: string[] = [];
+    for (const match of titleMatches) {
+      titles.push(match[1]);
+    }
+
+    // Create video results
+    for (let i = 0; i < Math.min(foundVideoIds.length, 5); i++) {
+      const videoId = foundVideoIds[i];
+      videos.push({
+        id: `youtube_${videoId}`,
+        source: 'youtube',
+        videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
+        thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+        title: titles[i] || `Vídeo YouTube - ${keywords[0] || 'produto'}`,
+        sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
+      });
     }
 
   } catch (error) {
-    console.error('Error searching Shopee videos:', error);
+    console.error('Layer 3 error:', error);
   }
 
   return videos;
 }
 
+// ========== LAYER 4: ALIEXPRESS VIDEOS ==========
+// Busca vídeos no AliExpress via Google site search
+
 async function searchAliExpressVideos(keywords: string[]): Promise<VideoResult[]> {
-  console.log('📦 Searching AliExpress videos for:', keywords);
+  console.log('📦 Layer 4: Searching AliExpress videos:', keywords);
   const videos: VideoResult[] = [];
 
   const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY');
   if (!firecrawlKey) {
-    console.log('⚠️ FIRECRAWL_API_KEY not configured, skipping AliExpress search');
+    console.log('⚠️ FIRECRAWL_API_KEY not configured');
     return videos;
   }
 
   try {
     const searchQuery = keywords[0] || keywords.join(' ');
-    const searchUrl = `https://pt.aliexpress.com/w/wholesale-${encodeURIComponent(searchQuery.replace(/ /g, '-'))}.html`;
+    // Use AliExpress direct search
+    const searchUrl = `https://pt.aliexpress.com/wholesale?SearchText=${encodeURIComponent(searchQuery)}`;
 
-    console.log('🔍 Scraping AliExpress search:', searchUrl);
+    console.log('🔍 Searching AliExpress:', searchUrl);
 
     const scrapeResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
       method: 'POST',
@@ -540,7 +741,7 @@ async function searchAliExpressVideos(keywords: string[]): Promise<VideoResult[]
       body: JSON.stringify({
         url: searchUrl,
         formats: ['html'],
-        waitFor: 3000,
+        waitFor: 4000,
         timeout: 30000,
       }),
     });
@@ -555,222 +756,81 @@ async function searchAliExpressVideos(keywords: string[]): Promise<VideoResult[]
 
     // Extract product links
     const productLinks: string[] = [];
-    const linkMatches = html.matchAll(/href="([^"]*\/item\/[^"]*)"/g);
-    for (const match of linkMatches) {
-      const link = match[1].startsWith('http') ? match[1] : `https://pt.aliexpress.com${match[1]}`;
-      if (!productLinks.includes(link) && productLinks.length < 5) {
-        productLinks.push(link);
-      }
-    }
+    const linkPatterns = [
+      /href="([^"]*\/item\/\d+\.html[^"]*)"/gi,
+      /href="([^"]*aliexpress\.[a-z]+\/item\/[^"]*)"/gi,
+    ];
 
-    // Also try different pattern
-    const altMatches = html.matchAll(/href="([^"]*aliexpress\.com[^"]*\/item\/\d+\.html[^"]*)"/g);
-    for (const match of altMatches) {
-      if (!productLinks.includes(match[1]) && productLinks.length < 5) {
-        productLinks.push(match[1]);
+    for (const pattern of linkPatterns) {
+      const matches = html.matchAll(pattern);
+      for (const match of matches) {
+        let link = match[1];
+        if (!link.startsWith('http')) {
+          link = `https://pt.aliexpress.com${link}`;
+        }
+        if (!productLinks.includes(link) && productLinks.length < 5) {
+          productLinks.push(link);
+        }
       }
     }
 
     console.log(`📦 Found ${productLinks.length} AliExpress product links`);
 
-    // For each product, try to extract video
+    // For each product, try to find video
     for (const productLink of productLinks.slice(0, 3)) {
       try {
-        const productHtml = await scrapeProductForVideo(productLink, firecrawlKey);
-        const videoUrls = extractVideoUrls(productHtml, 'aliexpress');
-        
-        for (const videoUrl of videoUrls) {
-          videos.push({
-            id: `aliexpress_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            source: 'aliexpress',
-            videoUrl,
-            thumbnailUrl: '',
-            title: `Vídeo AliExpress`,
-            sourceUrl: productLink,
-          });
-        }
-      } catch (e) {
-        console.error('Error scraping AliExpress product:', e);
-      }
-    }
+        const productResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${firecrawlKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            url: productLink,
+            formats: ['html'],
+            waitFor: 3000,
+            timeout: 20000,
+          }),
+        });
 
-  } catch (error) {
-    console.error('Error searching AliExpress videos:', error);
-  }
+        if (!productResponse.ok) continue;
 
-  return videos;
-}
+        const productData = await productResponse.json();
+        const productHtml = productData.data?.html || '';
 
-async function searchPinterestVideos(keywords: string[]): Promise<VideoResult[]> {
-  console.log('📌 Searching Pinterest videos for:', keywords);
-  const videos: VideoResult[] = [];
+        // Extract video URLs
+        const videoPatterns = [
+          /https?:\/\/[^"'\s]*alicdn\.com[^"'\s]*\.mp4/gi,
+          /"videoUrl":\s*"([^"]+\.mp4[^"]*)"/gi,
+          /"video":\s*\{[^}]*"url":\s*"([^"]+)"/gi,
+        ];
 
-  const pinterestAppId = Deno.env.get('PINTEREST_APP_ID');
-  const pinterestAppSecret = Deno.env.get('PINTEREST_APP_SECRET');
-
-  if (!pinterestAppId || !pinterestAppSecret) {
-    console.log('⚠️ Pinterest credentials not configured, skipping Pinterest search');
-    return videos;
-  }
-
-  // Pinterest API requires OAuth token, so we'll use Firecrawl as fallback
-  const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY');
-  if (!firecrawlKey) {
-    console.log('⚠️ FIRECRAWL_API_KEY not configured for Pinterest scraping');
-    return videos;
-  }
-
-  try {
-    const searchQuery = keywords[0] || keywords.join(' ');
-    const searchUrl = `https://br.pinterest.com/search/videos/?q=${encodeURIComponent(searchQuery)}`;
-
-    console.log('🔍 Scraping Pinterest search:', searchUrl);
-
-    const scrapeResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${firecrawlKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url: searchUrl,
-        formats: ['html'],
-        waitFor: 3000,
-        timeout: 30000,
-      }),
-    });
-
-    if (!scrapeResponse.ok) {
-      console.error('Firecrawl Pinterest error:', scrapeResponse.status);
-      return videos;
-    }
-
-    const scrapeData = await scrapeResponse.json();
-    const html = scrapeData.data?.html || '';
-
-    // Extract video pins
-    const videoUrls = extractVideoUrls(html, 'pinterest');
-    
-    for (const videoUrl of videoUrls.slice(0, 10)) {
-      videos.push({
-        id: `pinterest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        source: 'pinterest',
-        videoUrl,
-        thumbnailUrl: '',
-        title: `Vídeo Pinterest - ${searchQuery}`,
-      });
-    }
-
-    // Also try to find pin links and scrape them
-    const pinMatches = html.matchAll(/href="\/pin\/(\d+)\/"/g);
-    const pinIds: string[] = [];
-    for (const match of pinMatches) {
-      if (pinIds.length < 5 && !pinIds.includes(match[1])) {
-        pinIds.push(match[1]);
-      }
-    }
-
-    console.log(`📌 Found ${pinIds.length} pin IDs`);
-
-    for (const pinId of pinIds.slice(0, 3)) {
-      try {
-        const pinUrl = `https://br.pinterest.com/pin/${pinId}/`;
-        const pinHtml = await scrapeProductForVideo(pinUrl, firecrawlKey);
-        const pinVideos = extractVideoUrls(pinHtml, 'pinterest');
-        
-        for (const videoUrl of pinVideos) {
-          if (!videos.find(v => v.videoUrl === videoUrl)) {
-            videos.push({
-              id: `pinterest_${pinId}`,
-              source: 'pinterest',
-              videoUrl,
-              thumbnailUrl: '',
-              title: `Pin ${pinId}`,
-              sourceUrl: pinUrl,
-            });
+        for (const pattern of videoPatterns) {
+          const matches = productHtml.matchAll(pattern);
+          for (const match of matches) {
+            const videoUrl = (match[1] || match[0]).replace(/\\u002F/g, '/').replace(/\\/g, '');
+            if (videoUrl && videoUrl.includes('.mp4')) {
+              videos.push({
+                id: `aliexpress_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+                source: 'aliexpress',
+                videoUrl,
+                thumbnailUrl: '',
+                title: `Vídeo AliExpress - ${searchQuery}`,
+                sourceUrl: productLink,
+              });
+              break;
+            }
           }
+          if (videos.filter(v => v.source === 'aliexpress').length >= 3) break;
         }
-      } catch (e) {
-        console.error('Error scraping Pinterest pin:', e);
+      } catch (err) {
+        console.error('Error scraping AliExpress product:', err);
       }
     }
 
   } catch (error) {
-    console.error('Error searching Pinterest videos:', error);
+    console.error('Layer 4 error:', error);
   }
 
-  return videos;
-}
-
-async function scrapeProductForVideo(url: string, apiKey: string): Promise<string> {
-  try {
-    const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url,
-        formats: ['html'],
-        waitFor: 2000,
-        timeout: 20000,
-      }),
-    });
-
-    if (!response.ok) {
-      return '';
-    }
-
-    const data = await response.json();
-    return data.data?.html || '';
-  } catch (error) {
-    console.error('Error scraping product:', error);
-    return '';
-  }
-}
-
-function extractVideoUrls(html: string, source: string): string[] {
-  const videos: string[] = [];
-
-  // Common video patterns
-  const patterns: RegExp[] = [];
-
-  if (source === 'shopee') {
-    patterns.push(
-      /https?:\/\/cvf\.shopee\.com\.br\/file\/[a-zA-Z0-9_-]+/g,
-      /https?:\/\/v\.shopee\.com\.br\/[a-zA-Z0-9_\/-]+\.mp4/g,
-      /"video[Uu]rl"\s*:\s*"([^"]+)"/g,
-    );
-  } else if (source === 'aliexpress') {
-    patterns.push(
-      /https?:\/\/video\.aliexpress\.[a-z]+\/[^\s"'<>]+\.mp4/gi,
-      /https?:\/\/ae\d+\.alicdn\.com\/[^\s"'<>]+\.mp4/gi,
-      /"videoUrl"\s*:\s*"([^"]+)"/g,
-    );
-  } else if (source === 'pinterest') {
-    patterns.push(
-      /https?:\/\/v\d*\.pinimg\.com\/videos\/[^\s"'<>]+\.mp4/gi,
-      /"video_list"[^}]*"url"\s*:\s*"([^"]+\.mp4[^"]*)"/g,
-      /https?:\/\/[^\s"'<>]+pinimg\.com[^\s"'<>]+\.mp4/gi,
-    );
-  }
-
-  for (const pattern of patterns) {
-    const matches = html.matchAll(pattern);
-    for (const match of matches) {
-      // If it's a capture group pattern, use the captured group
-      const url = match[1] || match[0];
-      if (url && !videos.includes(url) && url.includes('http')) {
-        // Unescape URL if needed
-        const cleanUrl = url.replace(/\\u002F/g, '/').replace(/\\/g, '');
-        if (cleanUrl.match(/\.(mp4|webm|mov)/i)) {
-          videos.push(cleanUrl);
-        }
-      }
-    }
-  }
-
-  console.log(`📹 Extracted ${videos.length} videos from ${source}`);
   return videos;
 }
