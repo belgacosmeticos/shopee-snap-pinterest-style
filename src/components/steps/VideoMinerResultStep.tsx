@@ -18,6 +18,8 @@ import {
   AlertCircle,
   Video,
   CheckCircle2,
+  Youtube,
+  Instagram,
 } from 'lucide-react';
 import type { MineResult, VideoResult } from '../VideoMinerTool';
 import { toast } from 'sonner';
@@ -27,7 +29,7 @@ interface VideoMinerResultStepProps {
   onReset: () => void;
 }
 
-type SourceFilter = 'all' | 'shopee' | 'aliexpress' | 'pinterest' | 'tiktok';
+type SourceFilter = 'all' | 'shopee' | 'aliexpress' | 'pinterest' | 'tiktok' | 'youtube' | 'instagram';
 
 export const VideoMinerResultStep = ({ result, onReset }: VideoMinerResultStepProps) => {
   const [selectedVideos, setSelectedVideos] = useState<Set<string>>(new Set());
@@ -49,6 +51,12 @@ export const VideoMinerResultStep = ({ result, onReset }: VideoMinerResultStepPr
         return <Pin className="w-4 h-4" />;
       case 'tiktok':
         return <Music className="w-4 h-4" />;
+      case 'youtube':
+        return <Youtube className="w-4 h-4" />;
+      case 'instagram':
+        return <Instagram className="w-4 h-4" />;
+      default:
+        return <Video className="w-4 h-4" />;
     }
   };
 
@@ -62,6 +70,12 @@ export const VideoMinerResultStep = ({ result, onReset }: VideoMinerResultStepPr
         return 'Pinterest';
       case 'tiktok':
         return 'TikTok';
+      case 'youtube':
+        return 'YouTube';
+      case 'instagram':
+        return 'Instagram';
+      default:
+        return source;
     }
   };
 
@@ -75,6 +89,12 @@ export const VideoMinerResultStep = ({ result, onReset }: VideoMinerResultStepPr
         return 'bg-red-600/20 text-red-500 border-red-600/30';
       case 'tiktok':
         return 'bg-pink-500/20 text-pink-400 border-pink-500/30';
+      case 'youtube':
+        return 'bg-red-500/20 text-red-500 border-red-500/30';
+      case 'instagram':
+        return 'bg-gradient-to-r from-purple-500/20 to-pink-500/20 text-pink-400 border-pink-500/30';
+      default:
+        return 'bg-muted text-muted-foreground border-muted';
     }
   };
 
@@ -309,15 +329,27 @@ export const VideoMinerResultStep = ({ result, onReset }: VideoMinerResultStepPr
                     )}
 
                     <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="flex-1"
-                        onClick={() => handleDownload(video)}
-                      >
-                        <Download className="w-4 h-4 mr-1" />
-                        Baixar
-                      </Button>
+                      {video.isSearchLink ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => window.open(video.videoUrl, '_blank')}
+                        >
+                          <Search className="w-4 h-4 mr-1" />
+                          Abrir Busca
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => handleDownload(video)}
+                        >
+                          <Download className="w-4 h-4 mr-1" />
+                          Baixar
+                        </Button>
+                      )}
                       {video.sourceUrl && (
                         <Button
                           variant="ghost"

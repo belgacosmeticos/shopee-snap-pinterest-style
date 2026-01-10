@@ -5,13 +5,14 @@ import { VideoMinerResultStep } from './steps/VideoMinerResultStep';
 
 export interface VideoResult {
   id: string;
-  source: 'shopee' | 'aliexpress' | 'pinterest' | 'tiktok';
+  source: 'shopee' | 'aliexpress' | 'pinterest' | 'tiktok' | 'youtube' | 'instagram';
   videoUrl: string;
   thumbnailUrl: string;
   title: string;
   duration?: string;
   author?: string;
   sourceUrl?: string;
+  isSearchLink?: boolean;
 }
 
 export interface MineResult {

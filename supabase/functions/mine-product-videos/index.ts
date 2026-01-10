@@ -7,13 +7,14 @@ const corsHeaders = {
 
 interface VideoResult {
   id: string;
-  source: 'shopee' | 'aliexpress' | 'pinterest' | 'youtube';
+  source: 'shopee' | 'aliexpress' | 'pinterest' | 'youtube' | 'tiktok' | 'instagram';
   videoUrl: string;
   thumbnailUrl: string;
   title: string;
   duration?: string;
   author?: string;
   sourceUrl?: string;
+  isSearchLink?: boolean;
 }
 
 interface MineResult {
@@ -98,12 +99,32 @@ serve(async (req) => {
     // LAYER 3: YouTube Videos (via search scraping)
     try {
       console.log('📺 LAYER 3: Searching YouTube videos...');
-      const youtubeVideos = await searchYouTubeVideos(productInfo.keywords);
+      const youtubeVideos = await searchYouTubeVideos(productInfo.keywords, productInfo.name);
       allVideos.push(...youtubeVideos);
       console.log(`✅ Layer 3: Found ${youtubeVideos.length} videos from YouTube`);
     } catch (err) {
       console.error('Layer 3 error:', err);
       errors.push('Erro ao buscar vídeos no YouTube');
+    }
+
+    // LAYER 5: TikTok Search Links
+    try {
+      console.log('🎵 LAYER 5: Generating TikTok search links...');
+      const tiktokLinks = generateTikTokSearchLinks(productInfo.keywords, productInfo.name);
+      allVideos.push(...tiktokLinks);
+      console.log(`✅ Layer 5: Generated ${tiktokLinks.length} TikTok search links`);
+    } catch (err) {
+      console.error('Layer 5 error:', err);
+    }
+
+    // LAYER 6: Instagram Search Links
+    try {
+      console.log('📸 LAYER 6: Generating Instagram search links...');
+      const instagramLinks = generateInstagramSearchLinks(productInfo.keywords, productInfo.name);
+      allVideos.push(...instagramLinks);
+      console.log(`✅ Layer 6: Generated ${instagramLinks.length} Instagram search links`);
+    } catch (err) {
+      console.error('Layer 6 error:', err);
     }
 
     // LAYER 4: AliExpress Videos (via Google site search)
@@ -179,7 +200,7 @@ function generateKeywords(productName: string): string[] {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '') // Remove accents
-    .replace(/[^\w\s]/g, ' ') // Remove special chars
+    .replace(/[^\w\s0-9]/g, ' ') // Keep numbers for model/specs
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -188,20 +209,24 @@ function generateKeywords(productName: string): string[] {
     'de', 'para', 'com', 'em', 'um', 'uma', 'e', 'ou', 'a', 'o', 'da', 'do', 'das', 'dos',
     'na', 'no', 'nas', 'nos', 'por', 'ao', 'aos', 'pelo', 'pela', 'pelos', 'pelas',
     'kit', 'pcs', 'unidades', 'unidade', 'pacote', 'conjunto', 'promocao', 'promo',
-    'frete', 'gratis', 'oferta', 'original', 'novo', 'nova', 'qualidade', 'premium'
+    'frete', 'gratis', 'oferta', 'original', 'novo', 'nova', 'qualidade', 'premium',
+    'envio', 'rapido', 'entrega', 'brasil', 'pronta', 'estoque', 'loja', 'oficial'
   ]);
 
-  // Extract meaningful keywords
+  // Extract meaningful keywords - prioritize specs, model, brand
   const words = cleaned.split(' ')
-    .filter(w => w.length > 2 && !stopwords.has(w));
+    .filter(w => w.length > 1 && !stopwords.has(w));
 
-  // Take first 5 most relevant words
-  const keywords = words.slice(0, 5);
+  // Take first 6 most relevant words (more specific)
+  const keywords = words.slice(0, 6);
 
-  // Also create a combined search term
-  const mainKeyword = keywords.slice(0, 3).join(' ');
+  // Create a more specific combined search term with product specifics
+  const mainKeyword = keywords.slice(0, 4).join(' ');
+  
+  // Also save the full product name (cleaned) for exact searches
+  const fullProductName = cleaned.slice(0, 60);
 
-  return [mainKeyword, ...keywords].filter(Boolean);
+  return [fullProductName, mainKeyword, ...keywords].filter((k, i, arr) => k && arr.indexOf(k) === i);
 }
 
 // ========== PRODUCT INFO EXTRACTION ==========
@@ -628,7 +653,7 @@ async function searchShopeeVideosByKeyword(keywords: string[]): Promise<VideoRes
 // ========== LAYER 3: YOUTUBE VIDEOS ==========
 // Busca vídeos de review/unboxing no YouTube
 
-async function searchYouTubeVideos(keywords: string[]): Promise<VideoResult[]> {
+async function searchYouTubeVideos(keywords: string[], productName: string): Promise<VideoResult[]> {
   console.log('📺 Layer 3: Searching YouTube videos:', keywords);
   const videos: VideoResult[] = [];
 
@@ -639,7 +664,9 @@ async function searchYouTubeVideos(keywords: string[]): Promise<VideoResult[]> {
   }
 
   try {
-    const searchQuery = `${keywords[0] || keywords.join(' ')} review unboxing`;
+    // Use more specific search with product name in quotes for exact match
+    const exactProduct = productName.slice(0, 50).replace(/[^\w\s]/g, '');
+    const searchQuery = `"${exactProduct}" review`;
     const youtubeUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`;
 
     console.log('🔍 Searching YouTube:', youtubeUrl);
@@ -833,4 +860,67 @@ async function searchAliExpressVideos(keywords: string[]): Promise<VideoResult[]
   }
 
   return videos;
+}
+
+// ========== LAYER 5: TIKTOK SEARCH LINKS ==========
+// Gera links de busca direta no TikTok para o usuário abrir
+
+function generateTikTokSearchLinks(keywords: string[], productName: string): VideoResult[] {
+  console.log('🎵 Layer 5: Generating TikTok search links');
+  
+  // Clean product name for TikTok search
+  const cleanedName = productName
+    .slice(0, 40)
+    .replace(/[^\w\s]/g, '')
+    .trim();
+  
+  if (!cleanedName) return [];
+
+  const tiktokSearchUrl = `https://www.tiktok.com/search?q=${encodeURIComponent(cleanedName)}`;
+  
+  return [{
+    id: `tiktok_search_${Date.now()}`,
+    source: 'tiktok',
+    videoUrl: tiktokSearchUrl,
+    thumbnailUrl: '',
+    title: `🔍 Buscar "${cleanedName}" no TikTok`,
+    sourceUrl: tiktokSearchUrl,
+    isSearchLink: true,
+  }];
+}
+
+// ========== LAYER 6: INSTAGRAM SEARCH LINKS ==========
+// Gera links de busca/hashtag no Instagram para o usuário abrir
+
+function generateInstagramSearchLinks(keywords: string[], productName: string): VideoResult[] {
+  console.log('📸 Layer 6: Generating Instagram search links');
+  
+  // Create hashtag from product keywords
+  const mainKeywords = keywords.slice(0, 3).join('');
+  const hashtag = mainKeywords
+    .replace(/[^\w]/g, '')
+    .toLowerCase()
+    .slice(0, 30);
+  
+  if (!hashtag || hashtag.length < 3) return [];
+
+  const instagramHashtagUrl = `https://www.instagram.com/explore/tags/${hashtag}/`;
+  
+  // Also create a Reels search link
+  const cleanedName = productName
+    .slice(0, 30)
+    .replace(/[^\w\s]/g, '')
+    .trim();
+  
+  const results: VideoResult[] = [{
+    id: `instagram_hashtag_${Date.now()}`,
+    source: 'instagram',
+    videoUrl: instagramHashtagUrl,
+    thumbnailUrl: '',
+    title: `🔍 Explorar #${hashtag} no Instagram`,
+    sourceUrl: instagramHashtagUrl,
+    isSearchLink: true,
+  }];
+
+  return results;
 }
