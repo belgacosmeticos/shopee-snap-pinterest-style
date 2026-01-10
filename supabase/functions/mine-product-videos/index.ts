@@ -791,33 +791,33 @@ async function searchTikTokVideosApify(keywords: string[], productName: string):
   }
 
   try {
-    // Clean product name for TikTok search
-    const searchQuery = productName
-      .slice(0, 50)
-      .replace(/[^\w\s]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    // Create hashtag from product name (no spaces, no special chars)
+    const hashtag = productName
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // Remove accents
+      .replace(/[^a-z0-9]/g, '') // Remove EVERYTHING except letters and numbers
+      .slice(0, 30);
 
-    if (!searchQuery) {
-      console.log('⚠️ No valid search query for TikTok');
+    if (!hashtag || hashtag.length < 3) {
+      console.log('⚠️ No valid hashtag for TikTok');
       return videos;
     }
 
-    console.log('🔍 TikTok search query:', searchQuery);
+    console.log('🔍 TikTok hashtag search:', hashtag);
 
-    // Use Apify's TikTok scraper actor (clockworks/tiktok-scraper)
-    // Run the actor synchronously
+    // Use Apify's TikTok Hashtag Scraper (more efficient, less memory)
     const actorInput = {
-      searchQueries: [searchQuery],
+      hashtags: [hashtag],
       resultsPerPage: 15,
       shouldDownloadVideos: false,
       shouldDownloadCovers: false,
     };
 
-    console.log('📤 Calling Apify TikTok scraper...');
+    console.log('📤 Calling Apify TikTok Hashtag scraper...');
     
     const runResponse = await fetch(
-      `https://api.apify.com/v2/acts/clockworks~tiktok-scraper/run-sync-get-dataset-items?token=${apifyToken}`,
+      `https://api.apify.com/v2/acts/clockworks~tiktok-hashtag-scraper/run-sync-get-dataset-items?token=${apifyToken}`,
       {
         method: 'POST',
         headers: {
@@ -836,16 +836,28 @@ async function searchTikTokVideosApify(keywords: string[], productName: string):
     const items = await runResponse.json();
     console.log(`📦 Apify returned ${items.length} TikTok items`);
 
-    // Process results - extract video data
+    // Process results - extract video data with correct field mapping
     for (const item of items.slice(0, 10)) {
       try {
-        // The scraper returns different formats, handle them
-        const videoUrl = item.videoUrl || item.video?.downloadAddr || item.video?.playAddr || item.downloadUrl;
-        const thumbnailUrl = item.covers?.[0] || item.video?.cover || item.coverUrl || '';
-        const title = item.text || item.desc || item.description || `TikTok - ${searchQuery}`;
-        const author = item.authorMeta?.name || item.author?.nickname || item.authorName || '';
+        // Correct field mapping for TikTok Hashtag Scraper
+        const videoUrl = 
+          item.videoMeta?.downloadAddr ||
+          item.video?.downloadAddr ||
+          item.video?.playAddr ||
+          item.downloadUrl ||
+          item.webVideoUrl;
+        
+        const thumbnailUrl = 
+          item.videoMeta?.coverUrl || 
+          item.covers?.[0] || 
+          item.video?.cover || 
+          '';
+        
+        const title = item.text || item.desc || item.description || `TikTok #${hashtag}`;
+        const author = item.authorMeta?.name || item.authorMeta?.nickName || item.author?.nickname || '';
         const duration = item.videoMeta?.duration || item.video?.duration;
-        const webUrl = item.webVideoUrl || `https://www.tiktok.com/@${item.authorMeta?.name || 'user'}/video/${item.id}`;
+        const webUrl = item.webVideoUrl || 
+                       `https://www.tiktok.com/@${item.authorMeta?.name || 'user'}/video/${item.id}`;
 
         if (videoUrl) {
           videos.push({
@@ -888,10 +900,12 @@ async function searchInstagramReelsApify(keywords: string[], productName: string
   }
 
   try {
-    // Create hashtag from product keywords
-    const hashtag = keywords[1] || keywords[0] || productName
-      .replace(/[^\w]/g, '')
+    // Create hashtag from product name (no spaces, no special chars - critical fix!)
+    const hashtag = productName
       .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // Remove accents
+      .replace(/[^a-z0-9]/g, '') // Remove EVERYTHING except letters and numbers
       .slice(0, 30);
 
     if (!hashtag || hashtag.length < 3) {
@@ -901,11 +915,11 @@ async function searchInstagramReelsApify(keywords: string[], productName: string
 
     console.log('🔍 Instagram hashtag search:', hashtag);
 
-    // Use Apify's Instagram hashtag scraper
+    // Use Apify's Instagram hashtag scraper with correct input
     const actorInput = {
       hashtags: [hashtag],
       resultsLimit: 15,
-      resultsType: 'posts', // Gets reels too
+      resultsType: 'reels', // Focus on reels (short videos)
     };
 
     console.log('📤 Calling Apify Instagram scraper...');
@@ -999,19 +1013,19 @@ async function searchFacebookAdsApify(keywords: string[], productName: string): 
 
     console.log('🔍 Facebook Ad Library search:', searchQuery);
 
-    // Use Apify's Facebook Ads Library scraper
+    // Use correct Apify actor with correct input schema
     const actorInput = {
-      searchTerms: [searchQuery],
+      searchQuery: searchQuery,
       countryCode: 'BR',
-      adType: 'all',
-      mediaType: 'video',
-      maxItems: 15,
+      adActiveStatus: 'all',
+      mediaTypes: ['video'],
+      maxAds: 15,
     };
 
     console.log('📤 Calling Apify Facebook Ads scraper...');
     
     const runResponse = await fetch(
-      `https://api.apify.com/v2/acts/curious_coder~facebook-ads-library-scraper/run-sync-get-dataset-items?token=${apifyToken}`,
+      `https://api.apify.com/v2/acts/apify~facebook-ads-scraper/run-sync-get-dataset-items?token=${apifyToken}`,
       {
         method: 'POST',
         headers: {
@@ -1033,24 +1047,40 @@ async function searchFacebookAdsApify(keywords: string[], productName: string): 
     // Process results - extract video ads
     for (const item of items.slice(0, 10)) {
       try {
-        // Check if it has video
-        const videoUrl = item.videoUrl || item.video?.url || item.mediaUrl;
+        // Check if it has video - correct field mapping
+        const videoUrl = 
+          item.videoUrl || 
+          item.video?.url || 
+          item.videos?.[0]?.url ||
+          item.mediaUrl;
+        
         const hasVideo = videoUrl || item.hasVideo || item.mediaType === 'video';
 
         if (!hasVideo || !videoUrl) continue;
 
-        const thumbnailUrl = item.thumbnailUrl || item.imageUrl || item.snapshotUrl || '';
-        const title = item.adText?.slice(0, 100) || item.bodyText?.slice(0, 100) || `Facebook Ad - ${searchQuery}`;
-        const author = item.pageName || item.advertiserName || '';
+        const thumbnailUrl = 
+          item.thumbnailUrl || 
+          item.imageUrl || 
+          item.snapshot?.url ||
+          item.videos?.[0]?.thumbnail ||
+          '';
+        
+        const title = 
+          item.adText?.slice(0, 100) || 
+          item.bodyText?.slice(0, 100) || 
+          item.title ||
+          `Facebook Ad - ${searchQuery}`;
+        
+        const author = item.pageName || item.advertiserName || item.pageInfo?.name || '';
 
         videos.push({
-          id: `facebook_${item.adId || item.id || Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+          id: `facebook_${item.adArchiveId || item.adId || item.id || Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
           source: 'facebook',
           videoUrl,
           thumbnailUrl,
           title,
           author,
-          sourceUrl: item.adUrl || item.snapshotUrl,
+          sourceUrl: item.adUrl || item.snapshotUrl || item.adArchiveLink,
           isSearchLink: false,
         });
       } catch (err) {
