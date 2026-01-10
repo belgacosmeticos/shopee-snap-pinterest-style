@@ -4,6 +4,7 @@ import { Progress } from '@/components/ui/progress';
 import { ShoppingCart, Package, Pin, Check, Loader2, AlertCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import type { MineResult, SourcesConfig } from '../VideoMinerTool';
+import { useUsageTracker, COST_ESTIMATES } from '@/hooks/useUsageTracker';
 
 interface VideoMinerLoadingStepProps {
   productUrl: string;
@@ -18,6 +19,8 @@ export const VideoMinerLoadingStep = ({
   progress,
   onComplete,
 }: VideoMinerLoadingStepProps) => {
+  const { trackUsage } = useUsageTracker();
+
   useEffect(() => {
     const mineVideos = async () => {
       try {
@@ -37,6 +40,17 @@ export const VideoMinerLoadingStep = ({
           return;
         }
 
+        // Track usage for successful mining
+        if (data?.success) {
+          trackUsage({
+            tool: 'videominer',
+            action: 'video_mining',
+            costType: 'firecrawl',
+            estimatedCost: COST_ESTIMATES.videominer_mine,
+            success: true,
+          });
+        }
+
         onComplete(data as MineResult);
       } catch (err) {
         console.error('Mining exception:', err);
@@ -51,7 +65,7 @@ export const VideoMinerLoadingStep = ({
     };
 
     mineVideos();
-  }, [productUrl, sources, onComplete]);
+  }, [productUrl, sources, onComplete, trackUsage]);
 
   const getProgressPercent = () => {
     const entries = Object.entries(progress);

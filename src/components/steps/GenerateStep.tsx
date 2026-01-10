@@ -6,6 +6,7 @@ import { ArrowLeft, Sparkles, Shuffle, Camera, Sun, Building, Leaf, ShoppingBag,
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { ProductData, GeneratedResult, GenerationSettings, GeneratedImage } from '../PinGenTool';
+import { useUsageTracker, COST_ESTIMATES } from '@/hooks/useUsageTracker';
 
 interface GenerateStepProps {
   productData: ProductData;
@@ -34,6 +35,7 @@ export const GenerateStep = ({ productData, onGenerate, onBack, initialSettings 
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingCount, setGeneratingCount] = useState(0);
   const [loadingPhase, setLoadingPhase] = useState<'generating' | 'optimizing' | 'caption'>('generating');
+  const { trackUsage } = useUsageTracker();
 
   const generateSingleImage = async (): Promise<GeneratedImage> => {
     const { data: imageData, error: imageError } = await supabase.functions.invoke('generate-pinterest-image', {
@@ -92,6 +94,26 @@ export const GenerateStep = ({ productData, onGenerate, onBack, initialSettings 
       });
 
       if (captionError) throw captionError;
+
+      // Track usage for images
+      for (let i = 0; i < images.length; i++) {
+        trackUsage({
+          tool: 'pingen',
+          action: 'image_generation',
+          costType: 'lovable_ai',
+          estimatedCost: COST_ESTIMATES.pingen_image,
+          success: true,
+        });
+      }
+
+      // Track usage for caption
+      trackUsage({
+        tool: 'pingen',
+        action: 'caption_generation',
+        costType: 'lovable_ai',
+        estimatedCost: COST_ESTIMATES.pingen_caption,
+        success: true,
+      });
 
       toast.success(`${images.length} ${images.length === 1 ? 'imagem gerada' : 'imagens geradas'} com sucesso!`);
       
