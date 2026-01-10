@@ -7,6 +7,7 @@ import { Sparkles, Link, Loader2, Plus, X, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { SoraVideoData } from '../SoraGenTool';
+import { useUsageTracker, COST_ESTIMATES } from '@/hooks/useUsageTracker';
 
 interface SoraUrlInputStepProps {
   onSubmit: (data: SoraVideoData[]) => void;
@@ -21,7 +22,7 @@ export const SoraUrlInputStep = ({ onSubmit, isLoading, setIsLoading, cleanMetad
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [totalToExtract, setTotalToExtract] = useState(0);
-
+  const { trackUsage } = useUsageTracker();
   const addUrl = () => {
     if (urls.length < 5) {
       setUrls([...urls, '']);
@@ -113,6 +114,18 @@ export const SoraUrlInputStep = ({ onSubmit, isLoading, setIsLoading, cleanMetad
       }
 
       const successCount = extractedVideos.filter(v => v.success).length;
+      
+      // Track usage for each successful extraction
+      for (let i = 0; i < successCount; i++) {
+        trackUsage({
+          tool: 'soragen',
+          action: 'video_extraction',
+          costType: 'firecrawl',
+          estimatedCost: COST_ESTIMATES.soragen_extract,
+          success: true,
+        });
+      }
+
       if (successCount === validUrls.length) {
         toast.success(`${successCount} vídeo(s) extraído(s) com sucesso!`);
       } else if (successCount > 0) {

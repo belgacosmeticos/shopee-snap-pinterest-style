@@ -7,6 +7,7 @@ import { Loader2, Link2, Video, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import type { ExtractedVideo } from '../VideoGenTool';
+import { useUsageTracker, COST_ESTIMATES } from '@/hooks/useUsageTracker';
 
 interface VideoUrlInputStepProps {
   onSubmit: (data: { 
@@ -25,7 +26,7 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
   const [error, setError] = useState('');
   const [extractingProduct, setExtractingProduct] = useState(false);
   const [extractingVideos, setExtractingVideos] = useState(false);
-
+  const { trackUsage } = useUsageTracker();
   const handleVideoUrlChange = (index: number, value: string) => {
     const newUrls = [...videoUrls];
     newUrls[index] = value;
@@ -144,6 +145,18 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
       setExtractingVideos(false);
 
       console.log('[VideoUrlInputStep] Extracted videos:', extractedVideos);
+
+      // Track usage for each video extraction
+      const successfulExtractions = extractedVideos.filter(v => v.videoUrl !== null).length;
+      for (let i = 0; i < successfulExtractions; i++) {
+        trackUsage({
+          tool: 'videogen',
+          action: 'video_extraction',
+          costType: 'firecrawl',
+          estimatedCost: COST_ESTIMATES.videogen_extract,
+          success: true,
+        });
+      }
 
       onSubmit({
         title: productData.title || 'Produto Shopee',
