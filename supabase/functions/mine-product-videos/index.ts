@@ -7,7 +7,7 @@ const corsHeaders = {
 
 interface VideoResult {
   id: string;
-  source: 'shopee' | 'aliexpress' | 'pinterest' | 'youtube' | 'tiktok' | 'instagram';
+  source: 'shopee' | 'aliexpress' | 'pinterest' | 'tiktok' | 'instagram' | 'facebook';
   videoUrl: string;
   thumbnailUrl: string;
   title: string;
@@ -96,36 +96,7 @@ serve(async (req) => {
       }
     }
 
-    // LAYER 3: YouTube Videos (via search scraping)
-    try {
-      console.log('📺 LAYER 3: Searching YouTube videos...');
-      const youtubeVideos = await searchYouTubeVideos(productInfo.keywords, productInfo.name);
-      allVideos.push(...youtubeVideos);
-      console.log(`✅ Layer 3: Found ${youtubeVideos.length} videos from YouTube`);
-    } catch (err) {
-      console.error('Layer 3 error:', err);
-      errors.push('Erro ao buscar vídeos no YouTube');
-    }
-
-    // LAYER 5: TikTok Search Links
-    try {
-      console.log('🎵 LAYER 5: Generating TikTok search links...');
-      const tiktokLinks = generateTikTokSearchLinks(productInfo.keywords, productInfo.name);
-      allVideos.push(...tiktokLinks);
-      console.log(`✅ Layer 5: Generated ${tiktokLinks.length} TikTok search links`);
-    } catch (err) {
-      console.error('Layer 5 error:', err);
-    }
-
-    // LAYER 6: Instagram Search Links
-    try {
-      console.log('📸 LAYER 6: Generating Instagram search links...');
-      const instagramLinks = generateInstagramSearchLinks(productInfo.keywords, productInfo.name);
-      allVideos.push(...instagramLinks);
-      console.log(`✅ Layer 6: Generated ${instagramLinks.length} Instagram search links`);
-    } catch (err) {
-      console.error('Layer 6 error:', err);
-    }
+    // LAYER 3: REMOVED - YouTube videos are too long for Shopee Videos
 
     // LAYER 4: AliExpress Videos (via Google site search)
     if (sources?.aliexpress !== false) {
@@ -138,6 +109,39 @@ serve(async (req) => {
         console.error('Layer 4 error:', err);
         errors.push('Erro ao buscar vídeos no AliExpress');
       }
+    }
+
+    // LAYER 5: TikTok Videos via Apify (REAL videos, not search links)
+    try {
+      console.log('🎵 LAYER 5: Searching TikTok videos via Apify...');
+      const tiktokVideos = await searchTikTokVideosApify(productInfo.keywords, productInfo.name);
+      allVideos.push(...tiktokVideos);
+      console.log(`✅ Layer 5: Found ${tiktokVideos.length} TikTok videos`);
+    } catch (err) {
+      console.error('Layer 5 error:', err);
+      errors.push('Erro ao buscar vídeos no TikTok');
+    }
+
+    // LAYER 6: Instagram Reels via Apify (REAL videos, not search links)
+    try {
+      console.log('📸 LAYER 6: Searching Instagram Reels via Apify...');
+      const instagramVideos = await searchInstagramReelsApify(productInfo.keywords, productInfo.name);
+      allVideos.push(...instagramVideos);
+      console.log(`✅ Layer 6: Found ${instagramVideos.length} Instagram Reels`);
+    } catch (err) {
+      console.error('Layer 6 error:', err);
+      errors.push('Erro ao buscar reels no Instagram');
+    }
+
+    // LAYER 7: Facebook Ad Library via Apify (Professional ad videos)
+    try {
+      console.log('📘 LAYER 7: Searching Facebook Ad Library via Apify...');
+      const facebookAds = await searchFacebookAdsApify(productInfo.keywords, productInfo.name);
+      allVideos.push(...facebookAds);
+      console.log(`✅ Layer 7: Found ${facebookAds.length} Facebook Ads`);
+    } catch (err) {
+      console.error('Layer 7 error:', err);
+      errors.push('Erro ao buscar anúncios no Facebook');
     }
 
     // Remove duplicates by videoUrl
@@ -650,95 +654,6 @@ async function searchShopeeVideosByKeyword(keywords: string[]): Promise<VideoRes
   return videos;
 }
 
-// ========== LAYER 3: YOUTUBE VIDEOS ==========
-// Busca vídeos de review/unboxing no YouTube
-
-async function searchYouTubeVideos(keywords: string[], productName: string): Promise<VideoResult[]> {
-  console.log('📺 Layer 3: Searching YouTube videos:', keywords);
-  const videos: VideoResult[] = [];
-
-  const firecrawlKey = Deno.env.get('FIRECRAWL_API_KEY');
-  if (!firecrawlKey) {
-    console.log('⚠️ FIRECRAWL_API_KEY not configured');
-    return videos;
-  }
-
-  try {
-    // Use more specific search with product name in quotes for exact match
-    const exactProduct = productName.slice(0, 50).replace(/[^\w\s]/g, '');
-    const searchQuery = `"${exactProduct}" review`;
-    const youtubeUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`;
-
-    console.log('🔍 Searching YouTube:', youtubeUrl);
-
-    const scrapeResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${firecrawlKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url: youtubeUrl,
-        formats: ['html'],
-        waitFor: 3000,
-        timeout: 30000,
-      }),
-    });
-
-    if (!scrapeResponse.ok) {
-      console.error('Firecrawl YouTube error:', scrapeResponse.status);
-      return videos;
-    }
-
-    const scrapeData = await scrapeResponse.json();
-    const html = scrapeData.data?.html || '';
-
-    // Extract YouTube video IDs from various patterns
-    const videoIdPatterns = [
-      /\/watch\?v=([a-zA-Z0-9_-]{11})/g,
-      /"videoId":\s*"([a-zA-Z0-9_-]{11})"/g,
-      /\/embed\/([a-zA-Z0-9_-]{11})/g,
-    ];
-
-    const foundVideoIds: string[] = [];
-    for (const pattern of videoIdPatterns) {
-      const matches = html.matchAll(pattern);
-      for (const match of matches) {
-        if (!foundVideoIds.includes(match[1]) && foundVideoIds.length < 10) {
-          foundVideoIds.push(match[1]);
-        }
-      }
-    }
-
-    console.log(`📹 Found ${foundVideoIds.length} YouTube video IDs`);
-
-    // Extract titles for the videos
-    const titleMatches = html.matchAll(/"title":\s*\{"runs":\s*\[\{"text":\s*"([^"]+)"\}\]/g);
-    const titles: string[] = [];
-    for (const match of titleMatches) {
-      titles.push(match[1]);
-    }
-
-    // Create video results
-    for (let i = 0; i < Math.min(foundVideoIds.length, 5); i++) {
-      const videoId = foundVideoIds[i];
-      videos.push({
-        id: `youtube_${videoId}`,
-        source: 'youtube',
-        videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
-        thumbnailUrl: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
-        title: titles[i] || `Vídeo YouTube - ${keywords[0] || 'produto'}`,
-        sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
-      });
-    }
-
-  } catch (error) {
-    console.error('Layer 3 error:', error);
-  }
-
-  return videos;
-}
-
 // ========== LAYER 4: ALIEXPRESS VIDEOS ==========
 // Busca vídeos no AliExpress via Google site search
 
@@ -862,65 +777,292 @@ async function searchAliExpressVideos(keywords: string[]): Promise<VideoResult[]
   return videos;
 }
 
-// ========== LAYER 5: TIKTOK SEARCH LINKS ==========
-// Gera links de busca direta no TikTok para o usuário abrir
+// ========== LAYER 5: TIKTOK VIDEOS VIA APIFY ==========
+// Busca vídeos REAIS do TikTok via Apify API
 
-function generateTikTokSearchLinks(keywords: string[], productName: string): VideoResult[] {
-  console.log('🎵 Layer 5: Generating TikTok search links');
-  
-  // Clean product name for TikTok search
-  const cleanedName = productName
-    .slice(0, 40)
-    .replace(/[^\w\s]/g, '')
-    .trim();
-  
-  if (!cleanedName) return [];
+async function searchTikTokVideosApify(keywords: string[], productName: string): Promise<VideoResult[]> {
+  console.log('🎵 Layer 5: Searching TikTok videos via Apify');
+  const videos: VideoResult[] = [];
 
-  const tiktokSearchUrl = `https://www.tiktok.com/search?q=${encodeURIComponent(cleanedName)}`;
-  
-  return [{
-    id: `tiktok_search_${Date.now()}`,
-    source: 'tiktok',
-    videoUrl: tiktokSearchUrl,
-    thumbnailUrl: '',
-    title: `🔍 Buscar "${cleanedName}" no TikTok`,
-    sourceUrl: tiktokSearchUrl,
-    isSearchLink: true,
-  }];
+  const apifyToken = Deno.env.get('APIFY_API_TOKEN');
+  if (!apifyToken) {
+    console.log('⚠️ APIFY_API_TOKEN not configured');
+    return videos;
+  }
+
+  try {
+    // Clean product name for TikTok search
+    const searchQuery = productName
+      .slice(0, 50)
+      .replace(/[^\w\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!searchQuery) {
+      console.log('⚠️ No valid search query for TikTok');
+      return videos;
+    }
+
+    console.log('🔍 TikTok search query:', searchQuery);
+
+    // Use Apify's TikTok scraper actor (clockworks/tiktok-scraper)
+    // Run the actor synchronously
+    const actorInput = {
+      searchQueries: [searchQuery],
+      resultsPerPage: 15,
+      shouldDownloadVideos: false,
+      shouldDownloadCovers: false,
+    };
+
+    console.log('📤 Calling Apify TikTok scraper...');
+    
+    const runResponse = await fetch(
+      `https://api.apify.com/v2/acts/clockworks~tiktok-scraper/run-sync-get-dataset-items?token=${apifyToken}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(actorInput),
+      }
+    );
+
+    if (!runResponse.ok) {
+      const errorText = await runResponse.text();
+      console.error('Apify TikTok error:', runResponse.status, errorText);
+      return videos;
+    }
+
+    const items = await runResponse.json();
+    console.log(`📦 Apify returned ${items.length} TikTok items`);
+
+    // Process results - extract video data
+    for (const item of items.slice(0, 10)) {
+      try {
+        // The scraper returns different formats, handle them
+        const videoUrl = item.videoUrl || item.video?.downloadAddr || item.video?.playAddr || item.downloadUrl;
+        const thumbnailUrl = item.covers?.[0] || item.video?.cover || item.coverUrl || '';
+        const title = item.text || item.desc || item.description || `TikTok - ${searchQuery}`;
+        const author = item.authorMeta?.name || item.author?.nickname || item.authorName || '';
+        const duration = item.videoMeta?.duration || item.video?.duration;
+        const webUrl = item.webVideoUrl || `https://www.tiktok.com/@${item.authorMeta?.name || 'user'}/video/${item.id}`;
+
+        if (videoUrl) {
+          videos.push({
+            id: `tiktok_${item.id || Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+            source: 'tiktok',
+            videoUrl,
+            thumbnailUrl,
+            title: title.slice(0, 100),
+            author,
+            duration: duration ? `${Math.floor(duration)}s` : undefined,
+            sourceUrl: webUrl,
+            isSearchLink: false,
+          });
+        }
+      } catch (err) {
+        console.error('Error processing TikTok item:', err);
+      }
+    }
+
+    console.log(`✅ Extracted ${videos.length} TikTok videos`);
+
+  } catch (error) {
+    console.error('Layer 5 Apify TikTok error:', error);
+  }
+
+  return videos;
 }
 
-// ========== LAYER 6: INSTAGRAM SEARCH LINKS ==========
-// Gera links de busca/hashtag no Instagram para o usuário abrir
+// ========== LAYER 6: INSTAGRAM REELS VIA APIFY ==========
+// Busca Reels REAIS do Instagram via Apify API
 
-function generateInstagramSearchLinks(keywords: string[], productName: string): VideoResult[] {
-  console.log('📸 Layer 6: Generating Instagram search links');
-  
-  // Create hashtag from product keywords
-  const mainKeywords = keywords.slice(0, 3).join('');
-  const hashtag = mainKeywords
-    .replace(/[^\w]/g, '')
-    .toLowerCase()
-    .slice(0, 30);
-  
-  if (!hashtag || hashtag.length < 3) return [];
+async function searchInstagramReelsApify(keywords: string[], productName: string): Promise<VideoResult[]> {
+  console.log('📸 Layer 6: Searching Instagram Reels via Apify');
+  const videos: VideoResult[] = [];
 
-  const instagramHashtagUrl = `https://www.instagram.com/explore/tags/${hashtag}/`;
-  
-  // Also create a Reels search link
-  const cleanedName = productName
-    .slice(0, 30)
-    .replace(/[^\w\s]/g, '')
-    .trim();
-  
-  const results: VideoResult[] = [{
-    id: `instagram_hashtag_${Date.now()}`,
-    source: 'instagram',
-    videoUrl: instagramHashtagUrl,
-    thumbnailUrl: '',
-    title: `🔍 Explorar #${hashtag} no Instagram`,
-    sourceUrl: instagramHashtagUrl,
-    isSearchLink: true,
-  }];
+  const apifyToken = Deno.env.get('APIFY_API_TOKEN');
+  if (!apifyToken) {
+    console.log('⚠️ APIFY_API_TOKEN not configured');
+    return videos;
+  }
 
-  return results;
+  try {
+    // Create hashtag from product keywords
+    const hashtag = keywords[1] || keywords[0] || productName
+      .replace(/[^\w]/g, '')
+      .toLowerCase()
+      .slice(0, 30);
+
+    if (!hashtag || hashtag.length < 3) {
+      console.log('⚠️ No valid hashtag for Instagram');
+      return videos;
+    }
+
+    console.log('🔍 Instagram hashtag search:', hashtag);
+
+    // Use Apify's Instagram hashtag scraper
+    const actorInput = {
+      hashtags: [hashtag],
+      resultsLimit: 15,
+      resultsType: 'posts', // Gets reels too
+    };
+
+    console.log('📤 Calling Apify Instagram scraper...');
+    
+    const runResponse = await fetch(
+      `https://api.apify.com/v2/acts/apify~instagram-hashtag-scraper/run-sync-get-dataset-items?token=${apifyToken}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(actorInput),
+      }
+    );
+
+    if (!runResponse.ok) {
+      const errorText = await runResponse.text();
+      console.error('Apify Instagram error:', runResponse.status, errorText);
+      return videos;
+    }
+
+    const items = await runResponse.json();
+    console.log(`📦 Apify returned ${items.length} Instagram items`);
+
+    // Process results - only videos/reels
+    for (const item of items) {
+      try {
+        // Check if it's a video
+        const isVideo = item.type === 'Video' || item.isVideo || item.videoUrl;
+        
+        if (!isVideo) continue;
+
+        const videoUrl = item.videoUrl || item.video_url || item.displayUrl;
+        const thumbnailUrl = item.displayUrl || item.thumbnailUrl || item.previewUrl || '';
+        const title = item.caption?.slice(0, 100) || item.alt || `Reel #${hashtag}`;
+        const author = item.ownerUsername || item.owner?.username || '';
+        const duration = item.videoDuration;
+
+        if (videoUrl) {
+          videos.push({
+            id: `instagram_${item.id || item.shortCode || Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+            source: 'instagram',
+            videoUrl,
+            thumbnailUrl,
+            title,
+            author,
+            duration: duration ? `${Math.floor(duration)}s` : undefined,
+            sourceUrl: item.url || `https://www.instagram.com/p/${item.shortCode}/`,
+            isSearchLink: false,
+          });
+        }
+      } catch (err) {
+        console.error('Error processing Instagram item:', err);
+      }
+    }
+
+    console.log(`✅ Extracted ${videos.length} Instagram Reels`);
+
+  } catch (error) {
+    console.error('Layer 6 Apify Instagram error:', error);
+  }
+
+  return videos;
+}
+
+// ========== LAYER 7: FACEBOOK AD LIBRARY VIA APIFY ==========
+// Busca anúncios em vídeo na biblioteca de anúncios do Facebook
+
+async function searchFacebookAdsApify(keywords: string[], productName: string): Promise<VideoResult[]> {
+  console.log('📘 Layer 7: Searching Facebook Ad Library via Apify');
+  const videos: VideoResult[] = [];
+
+  const apifyToken = Deno.env.get('APIFY_API_TOKEN');
+  if (!apifyToken) {
+    console.log('⚠️ APIFY_API_TOKEN not configured');
+    return videos;
+  }
+
+  try {
+    // Clean product name for Facebook Ad Library search
+    const searchQuery = productName
+      .slice(0, 40)
+      .replace(/[^\w\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!searchQuery) {
+      console.log('⚠️ No valid search query for Facebook Ads');
+      return videos;
+    }
+
+    console.log('🔍 Facebook Ad Library search:', searchQuery);
+
+    // Use Apify's Facebook Ads Library scraper
+    const actorInput = {
+      searchTerms: [searchQuery],
+      countryCode: 'BR',
+      adType: 'all',
+      mediaType: 'video',
+      maxItems: 15,
+    };
+
+    console.log('📤 Calling Apify Facebook Ads scraper...');
+    
+    const runResponse = await fetch(
+      `https://api.apify.com/v2/acts/curious_coder~facebook-ads-library-scraper/run-sync-get-dataset-items?token=${apifyToken}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(actorInput),
+      }
+    );
+
+    if (!runResponse.ok) {
+      const errorText = await runResponse.text();
+      console.error('Apify Facebook Ads error:', runResponse.status, errorText);
+      return videos;
+    }
+
+    const items = await runResponse.json();
+    console.log(`📦 Apify returned ${items.length} Facebook Ads items`);
+
+    // Process results - extract video ads
+    for (const item of items.slice(0, 10)) {
+      try {
+        // Check if it has video
+        const videoUrl = item.videoUrl || item.video?.url || item.mediaUrl;
+        const hasVideo = videoUrl || item.hasVideo || item.mediaType === 'video';
+
+        if (!hasVideo || !videoUrl) continue;
+
+        const thumbnailUrl = item.thumbnailUrl || item.imageUrl || item.snapshotUrl || '';
+        const title = item.adText?.slice(0, 100) || item.bodyText?.slice(0, 100) || `Facebook Ad - ${searchQuery}`;
+        const author = item.pageName || item.advertiserName || '';
+
+        videos.push({
+          id: `facebook_${item.adId || item.id || Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+          source: 'facebook',
+          videoUrl,
+          thumbnailUrl,
+          title,
+          author,
+          sourceUrl: item.adUrl || item.snapshotUrl,
+          isSearchLink: false,
+        });
+      } catch (err) {
+        console.error('Error processing Facebook Ad item:', err);
+      }
+    }
+
+    console.log(`✅ Extracted ${videos.length} Facebook Ad videos`);
+
+  } catch (error) {
+    console.error('Layer 7 Apify Facebook Ads error:', error);
+  }
+
+  return videos;
 }

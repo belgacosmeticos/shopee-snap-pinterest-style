@@ -5,7 +5,7 @@ import { VideoMinerResultStep } from './steps/VideoMinerResultStep';
 
 export interface VideoResult {
   id: string;
-  source: 'shopee' | 'aliexpress' | 'pinterest' | 'tiktok' | 'youtube' | 'instagram';
+  source: 'shopee' | 'aliexpress' | 'pinterest' | 'tiktok' | 'instagram' | 'facebook';
   videoUrl: string;
   thumbnailUrl: string;
   title: string;
