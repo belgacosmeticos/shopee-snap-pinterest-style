@@ -3,8 +3,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PinGenTool } from './PinGenTool';
 import { VideoGenTool } from './VideoGenTool';
 import { SoraGenTool } from './SoraGenTool';
-import { ImageIcon, Video, Sparkles } from 'lucide-react';
-
+import { VideoMinerTool } from './VideoMinerTool';
+import { ImageIcon, Video, Sparkles, Search } from 'lucide-react';
 export const ToolsDashboard = () => {
   const [activeTab, setActiveTab] = useState('pingen');
 
@@ -23,7 +23,7 @@ export const ToolsDashboard = () => {
 
         {/* Tool Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full max-w-lg mx-auto grid-cols-3 mb-6 h-12">
+          <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-4 mb-6 h-12">
             <TabsTrigger value="pingen" className="gap-2 text-xs md:text-sm">
               <ImageIcon className="w-4 h-4" />
               <span className="hidden sm:inline">PinGen</span>
@@ -39,6 +39,11 @@ export const ToolsDashboard = () => {
               <span className="hidden sm:inline">SoraGen</span>
               <span className="sm:hidden">Sora</span>
             </TabsTrigger>
+            <TabsTrigger value="videominer" className="gap-2 text-xs md:text-sm">
+              <Search className="w-4 h-4" />
+              <span className="hidden sm:inline">VideoMiner</span>
+              <span className="sm:hidden">Miner</span>
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="pingen" className="mt-0 animate-fade-in">
@@ -51,6 +56,10 @@ export const ToolsDashboard = () => {
 
           <TabsContent value="soragen" className="mt-0 animate-fade-in">
             <SoraGenTool />
+          </TabsContent>
+
+          <TabsContent value="videominer" className="mt-0 animate-fade-in">
+            <VideoMinerTool />
           </TabsContent>
         </Tabs>
       </div>
