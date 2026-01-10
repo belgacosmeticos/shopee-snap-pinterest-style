@@ -140,6 +140,61 @@ interface ProductInfo {
   shopId?: string;
 }
 
+async function tryShopeeApiForProductInfo(itemId: string, shopId: string): Promise<{ name: string; keywords: string[] } | null> {
+  console.log('🔄 Trying Shopee API for product info:', { itemId, shopId });
+  
+  const endpoints = [
+    `https://shopee.com.br/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`,
+    `https://shopee.com.br/api/v4/pdp/get_pc?item_id=${itemId}&shop_id=${shopId}`,
+  ];
+
+  const userAgents = [
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  ];
+
+  for (const endpoint of endpoints) {
+    for (const userAgent of userAgents) {
+      try {
+        console.log(`📡 Trying: ${endpoint}`);
+        const response = await fetch(endpoint, {
+          headers: {
+            'User-Agent': userAgent,
+            'Accept': 'application/json',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            'x-shopee-language': 'pt-BR',
+            'x-api-source': 'pc',
+            'Referer': 'https://shopee.com.br/',
+          },
+        });
+
+        if (!response.ok) {
+          console.log(`❌ API returned ${response.status}`);
+          continue;
+        }
+
+        const data = await response.json();
+        const itemData = data.data || data.item || data;
+        const name = itemData?.name || itemData?.title || itemData?.item?.name || itemData?.item?.title;
+
+        if (name && name.length > 3) {
+          console.log('✅ Got product name from API:', name);
+          return {
+            name,
+            keywords: generateKeywords(name)
+          };
+        }
+      } catch (e) {
+        console.error('API attempt failed:', e);
+      }
+    }
+  }
+  
+  console.log('❌ All API attempts failed');
+  return null;
+}
+
 async function extractProductInfo(url: string): Promise<ProductInfo> {
   console.log('📋 Extracting product info from:', url);
   
@@ -163,16 +218,18 @@ async function extractProductInfo(url: string): Promise<ProductInfo> {
       productName = decodeURIComponent(pathMatch[1]).replace(/-/g, ' ');
     }
 
-    // Extract item_id and shop_id
+    // Extract item_id and shop_id from various URL formats
     let itemId: string | undefined;
     let shopId: string | undefined;
 
+    // Standard format: i.SHOP_ID.ITEM_ID
     let match = finalUrl.match(/i\.(\d+)\.(\d+)/);
     if (match) {
       shopId = match[1];
       itemId = match[2];
     }
 
+    // Alternative format: /something/SHOP_ID/ITEM_ID
     if (!itemId) {
       match = finalUrl.match(/\/[a-zA-Z]+\/(\d+)\/(\d+)/);
       if (match) {
@@ -181,18 +238,39 @@ async function extractProductInfo(url: string): Promise<ProductInfo> {
       }
     }
 
+    console.log('Extracted IDs:', { itemId, shopId });
+
     // Try to get title from page HTML
     if (!productName) {
       try {
         const html = await response.text();
         const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
         if (titleMatch) {
-          productName = titleMatch[1]
+          const rawTitle = titleMatch[1]
             .replace(/\s*\|\s*Shopee\s*Brasil.*/i, '')
             .replace(/\s*-\s*Shopee.*/i, '')
             .trim();
+          
+          // Only use if it's a real product title (not just "Shopee Brasil" or similar)
+          if (rawTitle.length > 5 && !rawTitle.toLowerCase().includes('shopee')) {
+            productName = rawTitle;
+          }
         }
       } catch {}
+    }
+
+    // NEW: If no product name but we have IDs, try Shopee API
+    if (!productName && itemId && shopId) {
+      console.log('🔄 No product name found, trying Shopee API...');
+      const apiResult = await tryShopeeApiForProductInfo(itemId, shopId);
+      if (apiResult) {
+        return {
+          name: apiResult.name,
+          keywords: apiResult.keywords,
+          itemId,
+          shopId
+        };
+      }
     }
 
     // Generate keywords from product name
