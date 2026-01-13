@@ -13,7 +13,8 @@ import {
   ExternalLink,
   XCircle,
   Loader2,
-  Smartphone
+  Smartphone,
+  DownloadCloud
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -29,13 +30,6 @@ function decodeVideoUrl(url: string): string {
     .replace(/&#39;/g, "'");
 }
 
-// iPhone 16 Pro Max metadata for client-side injection
-const IPHONE_METADATA = {
-  make: 'Apple',
-  model: 'iPhone 16 Pro Max',
-  software: '18.4.1',
-};
-
 interface SoraResultStepProps {
   videos: SoraVideoData[];
   onReset: () => void;
@@ -47,6 +41,10 @@ export const SoraResultStep = ({ videos, onReset, cleanMetadata }: SoraResultSte
   const [copiedLinks, setCopiedLinks] = useState<Record<number, boolean>>({});
   const [downloadingIndex, setDownloadingIndex] = useState<number | null>(null);
   const [processingMetadata, setProcessingMetadata] = useState(false);
+  
+  // Batch download state
+  const [downloadingAll, setDownloadingAll] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0 });
 
   const handleCopyPrompt = async (index: number, prompt: string) => {
     try {
@@ -70,21 +68,21 @@ export const SoraResultStep = ({ videos, onReset, cleanMetadata }: SoraResultSte
     }
   };
 
-  const handleDownload = async (video: SoraVideoData, index: number) => {
+  const handleDownload = async (video: SoraVideoData, index: number, silent = false): Promise<boolean> => {
     const rawVideoUrl = video.videoUrlNoWatermark || video.videoUrl;
     
     if (!rawVideoUrl) {
-      toast.error('URL do vídeo não disponível.');
-      return;
+      if (!silent) toast.error('URL do vídeo não disponível.');
+      return false;
     }
 
     const videoUrl = decodeVideoUrl(rawVideoUrl);
     setDownloadingIndex(index);
 
     try {
-      toast.info('Baixando vídeo...');
+      if (!silent) toast.info('Baixando vídeo...');
       
-      // Use fetch directly to handle binary data properly (SDK corrupts binary responses)
+      // Use fetch directly to handle binary data properly
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-sora-video`,
         {
@@ -103,11 +101,10 @@ export const SoraResultStep = ({ videos, onReset, cleanMetadata }: SoraResultSte
       if (contentType.includes('application/json')) {
         const json = await response.json();
         if (json.directUrl) {
-          // Server couldn't proxy, try direct download
-          toast.info('Tentando download direto...');
+          if (!silent) toast.info('Tentando download direto...');
           window.open(json.directUrl, '_blank');
           setDownloadingIndex(null);
-          return;
+          return true;
         }
         throw new Error(json.error || 'Download failed');
       }
@@ -127,9 +124,22 @@ export const SoraResultStep = ({ videos, onReset, cleanMetadata }: SoraResultSte
       // Process metadata if enabled
       if (cleanMetadata) {
         setProcessingMetadata(true);
-        toast.info('Limpando metadados e adicionando iPhone 16 Pro Max...');
+        if (!silent) toast.info('Limpando metadados de IA...');
         
         try {
+          // Convert blob to base64 for processing
+          const arrayBuffer = await blob.arrayBuffer();
+          const bytes = new Uint8Array(arrayBuffer);
+          
+          // Convert to base64 in chunks
+          const chunkSize = 32768;
+          let binaryString = '';
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+            binaryString += String.fromCharCode.apply(null, Array.from(chunk));
+          }
+          const base64Video = btoa(binaryString);
+          
           // Send to process-video-metadata edge function
           const processResponse = await fetch(
             `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-video-metadata`,
@@ -139,34 +149,45 @@ export const SoraResultStep = ({ videos, onReset, cleanMetadata }: SoraResultSte
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
               },
-              body: JSON.stringify({ videoUrl }),
+              body: JSON.stringify({ videoBase64: base64Video }),
             }
           );
 
           if (processResponse.ok) {
-            const processContentType = processResponse.headers.get('content-type') || '';
+            const processData = await processResponse.json();
             
-            if (processContentType.includes('video/')) {
-              // Got processed video directly
-              blob = await processResponse.blob();
-              toast.success('Metadados processados com sucesso!');
-            } else {
-              // Got JSON response with base64 video
-              const processData = await processResponse.json();
-              if (processData.success && processData.videoBase64) {
-                const binaryString = atob(processData.videoBase64);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                  bytes[i] = binaryString.charCodeAt(i);
+            if (processData.success && processData.videoBase64) {
+              // Validate base64 before using
+              try {
+                const decodedBinary = atob(processData.videoBase64);
+                const processedBytes = new Uint8Array(decodedBinary.length);
+                for (let i = 0; i < decodedBinary.length; i++) {
+                  processedBytes[i] = decodedBinary.charCodeAt(i);
                 }
-                blob = new Blob([bytes], { type: 'video/mp4' });
-                toast.success('Metadados limpos! (iPhone 16 Pro Max)');
+                
+                // Verify the processed video is valid (same size as original)
+                if (processedBytes.length === bytes.length) {
+                  blob = new Blob([processedBytes], { type: 'video/mp4' });
+                  if (!silent) toast.success('Metadados de IA removidos!');
+                } else {
+                  console.warn('Size mismatch, using original');
+                  if (!silent) toast.warning('Processamento falhou, usando original.');
+                }
+              } catch (decodeError) {
+                console.error('Base64 decode failed:', decodeError);
+                if (!silent) toast.warning('Erro no processamento, usando original.');
               }
+            } else if (processData.error) {
+              console.warn('Processing error:', processData.error);
+              if (!silent) toast.warning('Não foi possível limpar metadados.');
             }
+          } else {
+            console.warn('Process response not ok:', processResponse.status);
+            if (!silent) toast.warning('Erro no servidor, baixando original.');
           }
         } catch (processError) {
-          console.warn('Metadata processing failed, using original:', processError);
-          toast.warning('Não foi possível processar metadados, baixando original.');
+          console.warn('Metadata processing failed:', processError);
+          if (!silent) toast.warning('Erro no processamento, baixando original.');
         }
         
         setProcessingMetadata(false);
@@ -176,7 +197,7 @@ export const SoraResultStep = ({ videos, onReset, cleanMetadata }: SoraResultSte
       const a = document.createElement('a');
       a.href = url;
       const filename = cleanMetadata 
-        ? `sora-iphone-${Date.now()}.mp4`
+        ? `sora-clean-${Date.now()}.mp4`
         : `sora-video-${Date.now()}.mp4`;
       a.download = filename;
       document.body.appendChild(a);
@@ -184,15 +205,52 @@ export const SoraResultStep = ({ videos, onReset, cleanMetadata }: SoraResultSte
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
       
-      toast.success('Download concluído!');
+      if (!silent) toast.success('Download concluído!');
+      return true;
     } catch (error) {
       console.error('Download error:', error);
       // Fallback: open in new tab
       window.open(videoUrl, '_blank');
-      toast.info('Abrindo vídeo em nova aba para download manual.');
+      if (!silent) toast.info('Abrindo vídeo em nova aba.');
+      return false;
     } finally {
       setDownloadingIndex(null);
       setProcessingMetadata(false);
+    }
+  };
+
+  // Batch download all videos
+  const handleDownloadAll = async () => {
+    if (successfulVideos.length === 0) return;
+    
+    setDownloadingAll(true);
+    setDownloadProgress({ current: 0, total: successfulVideos.length });
+    
+    let successCount = 0;
+    
+    for (let i = 0; i < successfulVideos.length; i++) {
+      const video = successfulVideos[i];
+      const originalIndex = videos.indexOf(video);
+      
+      setDownloadProgress({ current: i + 1, total: successfulVideos.length });
+      toast.info(`Baixando vídeo ${i + 1} de ${successfulVideos.length}...`);
+      
+      const success = await handleDownload(video, originalIndex, true);
+      if (success) successCount++;
+      
+      // Small delay between downloads to prevent overwhelming
+      if (i < successfulVideos.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    
+    setDownloadingAll(false);
+    setDownloadProgress({ current: 0, total: 0 });
+    
+    if (successCount === successfulVideos.length) {
+      toast.success(`${successCount} vídeos baixados com sucesso!`);
+    } else {
+      toast.warning(`${successCount} de ${successfulVideos.length} vídeos baixados.`);
     }
   };
 
@@ -208,6 +266,29 @@ export const SoraResultStep = ({ videos, onReset, cleanMetadata }: SoraResultSte
             {successfulVideos.length} de {videos.length} vídeos extraídos
           </span>
         </div>
+      )}
+
+      {/* Download All Button */}
+      {successfulVideos.length > 1 && (
+        <Button 
+          onClick={handleDownloadAll}
+          disabled={downloadingAll || downloadingIndex !== null}
+          className="w-full"
+          size="lg"
+        >
+          {downloadingAll ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Baixando {downloadProgress.current}/{downloadProgress.total}...
+            </>
+          ) : (
+            <>
+              <DownloadCloud className="w-4 h-4 mr-2" />
+              Baixar Todos ({successfulVideos.length} vídeos)
+              {cleanMetadata && <span className="ml-1 text-xs opacity-75">• Sem metadados IA</span>}
+            </>
+          )}
+        </Button>
       )}
 
       {/* Successful Videos */}
@@ -263,12 +344,12 @@ export const SoraResultStep = ({ videos, onReset, cleanMetadata }: SoraResultSte
                 <Button 
                   onClick={() => handleDownload(video, index)} 
                   className="flex-1"
-                  disabled={downloadingIndex !== null}
+                  disabled={downloadingIndex !== null || downloadingAll}
                 >
                   {downloadingIndex === index ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      {processingMetadata ? 'Processando...' : 'Baixando...'}
+                      {processingMetadata ? 'Limpando...' : 'Baixando...'}
                     </>
                   ) : (
                     <>
@@ -277,7 +358,7 @@ export const SoraResultStep = ({ videos, onReset, cleanMetadata }: SoraResultSte
                       ) : (
                         <Download className="w-4 h-4 mr-2" />
                       )}
-                      {cleanMetadata ? 'Baixar (iPhone)' : 'Baixar Vídeo'}
+                      {cleanMetadata ? 'Baixar (Limpo)' : 'Baixar Vídeo'}
                     </>
                   )}
                 </Button>

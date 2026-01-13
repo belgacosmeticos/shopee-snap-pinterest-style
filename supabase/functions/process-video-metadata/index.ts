@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// ==================== MP4 ATOM PARSER (Lightweight) ====================
+// ==================== MP4 ATOM PARSER (Zero-Out Approach) ====================
 
 interface AtomInfo {
   type: string;
@@ -17,16 +17,6 @@ interface AtomInfo {
 // Read 4 bytes as big-endian uint32
 function readUint32BE(data: Uint8Array, offset: number): number {
   return (data[offset] << 24) | (data[offset + 1] << 16) | (data[offset + 2] << 8) | data[offset + 3];
-}
-
-// Write 4 bytes as big-endian uint32
-function writeUint32BE(value: number): Uint8Array {
-  return new Uint8Array([
-    (value >> 24) & 0xff,
-    (value >> 16) & 0xff,
-    (value >> 8) & 0xff,
-    value & 0xff,
-  ]);
 }
 
 // Read atom type as string
@@ -54,110 +44,7 @@ function findAtoms(data: Uint8Array): AtomInfo[] {
   return atoms;
 }
 
-// Check if atom contains C2PA/JUMBF signature (minimal check)
-function isC2PAAtom(data: Uint8Array, atom: AtomInfo): boolean {
-  if (atom.type !== 'uuid') return false;
-  
-  // JUMBF signature check at offset 8-12
-  const jumbf = [0x6A, 0x75, 0x6D, 0x62]; // 'jumb'
-  const start = atom.offset + 8;
-  if (start + 4 <= data.length) {
-    if (data[start] === jumbf[0] && data[start + 1] === jumbf[1] && 
-        data[start + 2] === jumbf[2] && data[start + 3] === jumbf[3]) {
-      return true;
-    }
-  }
-  
-  // Quick scan for c2pa marker (check first 200 bytes only)
-  const scanEnd = Math.min(atom.offset + 200, atom.offset + atom.size);
-  for (let i = atom.offset + 8; i < scanEnd - 4; i++) {
-    if (data[i] === 0x63 && data[i+1] === 0x32 && data[i+2] === 0x70 && data[i+3] === 0x61) {
-      return true; // 'c2pa'
-    }
-  }
-  
-  return false;
-}
-
-// Create minimal Apple QuickTime udta atom
-function createAppleUdtaAtom(): Uint8Array {
-  const now = new Date();
-  const creationDate = now.toISOString().replace('Z', '-0300');
-  
-  // Simplified: just create basic metadata
-  const items: { key: string; value: string }[] = [
-    { key: '©mak', value: 'Apple' },
-    { key: '©mod', value: 'iPhone 16 Pro Max' },
-    { key: '©swr', value: '18.4.1' },
-    { key: '©day', value: creationDate },
-  ];
-
-  const ilistItems: Uint8Array[] = [];
-  
-  for (const item of items) {
-    const valueBytes = new TextEncoder().encode(item.value);
-    const dataSize = 16 + valueBytes.length;
-    const dataAtom = new Uint8Array(dataSize);
-    
-    dataAtom.set(writeUint32BE(dataSize), 0);
-    dataAtom.set(new TextEncoder().encode('data'), 4);
-    dataAtom.set(writeUint32BE(1), 8);
-    dataAtom.set(writeUint32BE(0), 12);
-    dataAtom.set(valueBytes, 16);
-    
-    const itemSize = 8 + dataSize;
-    const itemAtom = new Uint8Array(itemSize);
-    itemAtom.set(writeUint32BE(itemSize), 0);
-    itemAtom.set(new TextEncoder().encode(item.key), 4);
-    itemAtom.set(dataAtom, 8);
-    
-    ilistItems.push(itemAtom);
-  }
-
-  const ilistContentSize = ilistItems.reduce((sum, item) => sum + item.length, 0);
-  const ilistSize = 8 + ilistContentSize;
-  
-  const ilistAtom = new Uint8Array(ilistSize);
-  ilistAtom.set(writeUint32BE(ilistSize), 0);
-  ilistAtom.set(new TextEncoder().encode('ilst'), 4);
-  
-  let ilistOffset = 8;
-  for (const item of ilistItems) {
-    ilistAtom.set(item, ilistOffset);
-    ilistOffset += item.length;
-  }
-
-  // hdlr atom
-  const hdlrAtom = new Uint8Array([
-    0, 0, 0, 33,
-    0x68, 0x64, 0x6C, 0x72, // hdlr
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0x6D, 0x64, 0x69, 0x72, // mdir
-    0x61, 0x70, 0x70, 0x6C, // appl
-    0, 0, 0, 0,
-    0, 0, 0, 0,
-    0
-  ]);
-
-  const metaSize = 12 + hdlrAtom.length + ilistSize;
-  const metaAtom = new Uint8Array(metaSize);
-  metaAtom.set(writeUint32BE(metaSize), 0);
-  metaAtom.set(new TextEncoder().encode('meta'), 4);
-  metaAtom.set(writeUint32BE(0), 8);
-  metaAtom.set(hdlrAtom, 12);
-  metaAtom.set(ilistAtom, 12 + hdlrAtom.length);
-
-  const udtaSize = 8 + metaSize;
-  const udtaAtom = new Uint8Array(udtaSize);
-  udtaAtom.set(writeUint32BE(udtaSize), 0);
-  udtaAtom.set(new TextEncoder().encode('udta'), 4);
-  udtaAtom.set(metaAtom, 8);
-
-  return udtaAtom;
-}
-
-// Find moov internal atoms to locate/remove udta
+// Find moov internal atoms
 function findMoovChildren(data: Uint8Array, moovAtom: AtomInfo): AtomInfo[] {
   const children: AtomInfo[] = [];
   let offset = moovAtom.offset + 8;
@@ -176,82 +63,139 @@ function findMoovChildren(data: Uint8Array, moovAtom: AtomInfo): AtomInfo[] {
   return children;
 }
 
-// Process MP4: Remove C2PA, rebuild moov with new udta
-function processMP4(data: Uint8Array): Uint8Array {
-  const atoms = findAtoms(data);
-  console.log('[process-video-metadata] Found atoms:', atoms.map(a => a.type).join(', '));
+// Check for AI/C2PA markers in data
+function containsAIMarkers(data: Uint8Array, start: number, end: number): boolean {
+  const markers = [
+    [0x63, 0x32, 0x70, 0x61], // 'c2pa'
+    [0x6A, 0x75, 0x6D, 0x62], // 'jumb'
+    [0x73, 0x6F, 0x72, 0x61], // 'sora'
+    [0x6F, 0x70, 0x65, 0x6E], // 'open' (OpenAI)
+  ];
+  
+  for (let i = start; i < Math.min(end - 4, start + 500); i++) {
+    for (const marker of markers) {
+      if (data[i] === marker[0] && data[i+1] === marker[1] && 
+          data[i+2] === marker[2] && data[i+3] === marker[3]) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
-  const chunks: Uint8Array[] = [];
-  let moovProcessed = false;
+// Zero out content of an atom (preserving header structure)
+function zeroOutAtomContent(data: Uint8Array, atom: AtomInfo): void {
+  // Keep the 8-byte header (size + type), zero out the rest
+  const contentStart = atom.offset + 8;
+  const contentEnd = atom.offset + atom.size;
+  
+  for (let i = contentStart; i < contentEnd; i++) {
+    data[i] = 0x00;
+  }
+}
+
+// Zero out specific patterns within data range
+function zeroOutPatterns(data: Uint8Array, start: number, end: number): number {
+  let cleaned = 0;
+  const patterns = [
+    // C2PA signatures
+    [0x63, 0x32, 0x70, 0x61], // 'c2pa'
+    [0x6A, 0x75, 0x6D, 0x62], // 'jumb'
+    // AI tool signatures
+    [0x73, 0x6F, 0x72, 0x61], // 'sora'
+    [0x6F, 0x70, 0x65, 0x6E, 0x61, 0x69], // 'openai'
+    // Software identifiers
+    [0x53, 0x6F, 0x72, 0x61], // 'Sora'
+    [0x4F, 0x70, 0x65, 0x6E, 0x41, 0x49], // 'OpenAI'
+  ];
+  
+  for (let i = start; i < end - 6; i++) {
+    for (const pattern of patterns) {
+      let match = true;
+      for (let j = 0; j < pattern.length && i + j < end; j++) {
+        if (data[i + j] !== pattern[j]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) {
+        // Zero out the pattern
+        for (let j = 0; j < pattern.length && i + j < end; j++) {
+          data[i + j] = 0x00;
+        }
+        cleaned++;
+      }
+    }
+  }
+  
+  return cleaned;
+}
+
+// Process MP4: Zero-out approach (preserves file structure and offsets)
+function processMP4Safe(data: Uint8Array): Uint8Array {
+  // Create a copy to modify
+  const output = new Uint8Array(data);
+  
+  const atoms = findAtoms(output);
+  console.log('[process-video-metadata] Found atoms:', atoms.map(a => `${a.type}(${a.size})`).join(', '));
+
+  let totalCleaned = 0;
 
   for (const atom of atoms) {
-    // Skip C2PA/JUMBF atoms
-    if (isC2PAAtom(data, atom)) {
-      console.log('[process-video-metadata] Removing C2PA atom');
-      continue;
-    }
-
-    // Skip uuid atoms that might contain AI metadata
+    // Zero-out uuid atoms (typically contain C2PA/JUMBF)
     if (atom.type === 'uuid') {
-      console.log('[process-video-metadata] Removing uuid atom');
+      console.log('[process-video-metadata] Zeroing uuid atom at offset', atom.offset);
+      zeroOutAtomContent(output, atom);
+      totalCleaned++;
       continue;
     }
 
-    // Process moov - remove old udta, add new one
+    // Process moov atom - zero-out metadata in udta
     if (atom.type === 'moov') {
-      console.log('[process-video-metadata] Processing moov atom');
-      const moovChildren = findMoovChildren(data, atom);
-      
-      // Build new moov
-      const childChunks: Uint8Array[] = [];
+      const moovChildren = findMoovChildren(output, atom);
       
       for (const child of moovChildren) {
         if (child.type === 'udta') {
-          console.log('[process-video-metadata] Removing old udta');
-          continue; // Skip old udta
+          console.log('[process-video-metadata] Zeroing udta metadata at offset', child.offset);
+          // Zero out the entire udta content
+          zeroOutAtomContent(output, child);
+          totalCleaned++;
         }
-        childChunks.push(data.subarray(child.offset, child.offset + child.size));
+        
+        // Also check for meta atoms at moov level
+        if (child.type === 'meta') {
+          // Scan and zero out AI patterns within meta
+          const cleaned = zeroOutPatterns(output, child.offset + 8, child.offset + child.size);
+          if (cleaned > 0) {
+            console.log('[process-video-metadata] Zeroed', cleaned, 'patterns in meta atom');
+            totalCleaned += cleaned;
+          }
+        }
       }
-      
-      // Add new Apple udta
-      const newUdta = createAppleUdtaAtom();
-      childChunks.push(newUdta);
-      
-      // Calculate new moov size
-      const childrenSize = childChunks.reduce((sum, c) => sum + c.length, 0);
-      const newMoovSize = 8 + childrenSize;
-      
-      // Build moov header
-      const moovHeader = new Uint8Array(8);
-      moovHeader.set(writeUint32BE(newMoovSize), 0);
-      moovHeader.set(new TextEncoder().encode('moov'), 4);
-      
-      chunks.push(moovHeader);
-      for (const child of childChunks) {
-        chunks.push(child);
-      }
-      
-      moovProcessed = true;
-      continue;
     }
 
-    // Keep other atoms as-is (ftyp, mdat, free, etc.)
-    chunks.push(data.subarray(atom.offset, atom.offset + atom.size));
+    // Check free/skip atoms for hidden data
+    if (atom.type === 'free' || atom.type === 'skip') {
+      if (containsAIMarkers(output, atom.offset, atom.offset + atom.size)) {
+        console.log('[process-video-metadata] Zeroing suspicious', atom.type, 'atom');
+        zeroOutAtomContent(output, atom);
+        totalCleaned++;
+      }
+    }
   }
 
-  console.log('[process-video-metadata] Moov processed:', moovProcessed);
+  // Final pass: zero out any remaining AI-related strings in the file header area
+  // Only scan first 10KB to avoid corrupting video data
+  const headerScanEnd = Math.min(10240, output.length);
+  const headerCleaned = zeroOutPatterns(output, 0, headerScanEnd);
+  if (headerCleaned > 0) {
+    console.log('[process-video-metadata] Zeroed', headerCleaned, 'patterns in header area');
+    totalCleaned += headerCleaned;
+  }
 
-  // Combine chunks efficiently
-  const totalSize = chunks.reduce((sum, c) => sum + c.length, 0);
-  const output = new Uint8Array(totalSize);
+  console.log('[process-video-metadata] Total atoms/patterns cleaned:', totalCleaned);
+  console.log('[process-video-metadata] Output size (unchanged):', output.length);
   
-  let offset = 0;
-  for (const chunk of chunks) {
-    output.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  console.log('[process-video-metadata] Output size:', output.length);
   return output;
 }
 
@@ -272,7 +216,7 @@ serve(async (req) => {
       );
     }
 
-    console.log('[process-video-metadata] Processing video...');
+    console.log('[process-video-metadata] Processing video with zero-out approach...');
 
     let videoData: Uint8Array;
     
@@ -283,6 +227,7 @@ serve(async (req) => {
       for (let i = 0; i < binaryString.length; i++) {
         videoData[i] = binaryString.charCodeAt(i);
       }
+      console.log('[process-video-metadata] Decoded base64, size:', videoData.length);
     } else {
       console.log('[process-video-metadata] Fetching video from:', videoUrl);
       const videoResponse = await fetch(videoUrl, {
@@ -297,14 +242,24 @@ serve(async (req) => {
       
       const buffer = await videoResponse.arrayBuffer();
       videoData = new Uint8Array(buffer);
+      console.log('[process-video-metadata] Fetched video, size:', videoData.length);
     }
 
-    console.log('[process-video-metadata] Video fetched, size:', videoData.length);
+    // Validate MP4 signature
+    const ftyp = String.fromCharCode(videoData[4], videoData[5], videoData[6], videoData[7]);
+    if (ftyp !== 'ftyp') {
+      console.warn('[process-video-metadata] Warning: File may not be a valid MP4 (no ftyp at offset 4)');
+    }
 
-    // Process the video
-    const processedVideo = processMP4(videoData);
+    // Process the video with zero-out approach (preserves structure)
+    const processedVideo = processMP4Safe(videoData);
 
-    // Use Deno's base64 encoder (handles large arrays properly)
+    // Verify output is same size (zero-out should never change size)
+    if (processedVideo.length !== videoData.length) {
+      console.error('[process-video-metadata] ERROR: Size mismatch! Input:', videoData.length, 'Output:', processedVideo.length);
+      throw new Error('Processing error: size mismatch');
+    }
+
     // Convert to base64 in chunks to avoid stack overflow
     const chunkSize = 32768;
     let base64 = '';
@@ -319,6 +274,8 @@ serve(async (req) => {
         success: true,
         processed: true,
         videoBase64: base64,
+        originalSize: videoData.length,
+        processedSize: processedVideo.length,
         deviceModel: 'iPhone 16 Pro Max',
       }),
       {
