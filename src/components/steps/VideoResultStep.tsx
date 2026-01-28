@@ -188,11 +188,17 @@ export const VideoResultStep = ({
     toast.info('Faça upload do vídeo e cole a legenda');
   };
 
-  const handleShareFacebookReels = () => {
-    // Instagram Reels is more accessible - Facebook Reels requires creator studio
+  const handleShareInstagramReels = () => {
     const url = `https://www.instagram.com/reels/`;
     window.open(url, '_blank');
     toast.info('Abra o Instagram, crie um Reel e faça upload do vídeo');
+  };
+
+  const handleShareFacebookReels = () => {
+    // Facebook Reels Creator Studio
+    const url = `https://www.facebook.com/reels/create`;
+    window.open(url, '_blank');
+    toast.info('Faça upload do vídeo no Facebook Reels');
   };
 
   const handleNativeShare = async (video: ExtractedVideo, caption: string) => {
@@ -470,10 +476,19 @@ export const VideoResultStep = ({
                   <Button
                     size="sm"
                     onClick={handleShareFacebookReels}
+                    className="gap-2 bg-[#1877F2] hover:bg-[#1877F2]/90 text-white"
+                  >
+                    <FacebookIcon />
+                    FB Reel
+                  </Button>
+                  
+                  <Button
+                    size="sm"
+                    onClick={handleShareInstagramReels}
                     className="gap-2 bg-gradient-to-r from-[#833AB4] via-[#FD1D1D] to-[#F77737] hover:opacity-90 text-white"
                   >
                     <InstagramIcon />
-                    Reel
+                    IG Reel
                   </Button>
                 </div>
               </div>
