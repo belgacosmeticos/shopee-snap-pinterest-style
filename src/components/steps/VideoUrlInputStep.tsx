@@ -77,20 +77,28 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
       let originalLink: string | undefined;
 
       if (hasProductUrl) {
-        setExtractingProduct(true);
-        console.log('[VideoUrlInputStep] Extracting product data from:', productUrl);
-        const { data: productData, error: productError } = await supabase.functions.invoke('extract-shopee', {
-          body: { url: productUrl }
-        });
-        setExtractingProduct(false);
-
-        if (!productError && productData?.success) {
-          productTitle = productData.title || 'Produto Shopee';
-          affiliateLink = productData.affiliateLink;
-          originalLink = productData.originalLink || productUrl;
-          console.log('[VideoUrlInputStep] Product data:', productData);
+        // Check if user accidentally put a video link in the product field
+        const isVideoLink = productUrl.includes('shp.ee') && productUrl.includes('smtt');
+        
+        if (isVideoLink) {
+          console.log('[VideoUrlInputStep] Detected video link in product field, skipping product extraction');
+          // Don't try to extract product from video link - just continue with video extraction
         } else {
-          console.log('[VideoUrlInputStep] Product extraction failed, using defaults');
+          setExtractingProduct(true);
+          console.log('[VideoUrlInputStep] Extracting product data from:', productUrl);
+          const { data: productData, error: productError } = await supabase.functions.invoke('extract-shopee', {
+            body: { url: productUrl }
+          });
+          setExtractingProduct(false);
+
+          if (!productError && productData?.success) {
+            productTitle = productData.title || 'Produto Shopee';
+            affiliateLink = productData.affiliateLink;
+            originalLink = productData.originalLink || productUrl;
+            console.log('[VideoUrlInputStep] Product data:', productData);
+          } else {
+            console.log('[VideoUrlInputStep] Product extraction failed, using defaults');
+          }
         }
       } else {
         console.log('[VideoUrlInputStep] No product URL, skipping product extraction');
