@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 
 const CORRECT_PIN = '042721';
 const SESSION_KEY = 'shopee_tools_auth';
-const SESSION_DURATION = 3 * 60 * 60 * 1000; // 3 hours in milliseconds
+const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
 interface PinAuthProps {
   children: React.ReactNode;
