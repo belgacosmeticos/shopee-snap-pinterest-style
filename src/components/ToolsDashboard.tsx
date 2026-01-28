@@ -8,7 +8,7 @@ import { UsageAnalytics } from './UsageAnalytics';
 import { ImageIcon, Video, Sparkles, Search, BarChart3 } from 'lucide-react';
 
 export const ToolsDashboard = () => {
-  const [activeTab, setActiveTab] = useState('pingen');
+  const [activeTab, setActiveTab] = useState('videogen');
 
   return (
     <div className="min-h-screen gradient-soft">
@@ -26,15 +26,15 @@ export const ToolsDashboard = () => {
         {/* Tool Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full max-w-3xl mx-auto grid-cols-5 mb-6 h-12">
-            <TabsTrigger value="pingen" className="gap-2 text-xs md:text-sm">
-              <ImageIcon className="w-4 h-4" />
-              <span className="hidden sm:inline">PinGen</span>
-              <span className="sm:hidden">Pin</span>
-            </TabsTrigger>
             <TabsTrigger value="videogen" className="gap-2 text-xs md:text-sm">
               <Video className="w-4 h-4" />
               <span className="hidden sm:inline">VideoGen</span>
               <span className="sm:hidden">Video</span>
+            </TabsTrigger>
+            <TabsTrigger value="pingen" className="gap-2 text-xs md:text-sm">
+              <ImageIcon className="w-4 h-4" />
+              <span className="hidden sm:inline">PinGen</span>
+              <span className="sm:hidden">Pin</span>
             </TabsTrigger>
             <TabsTrigger value="soragen" className="gap-2 text-xs md:text-sm">
               <Sparkles className="w-4 h-4" />
@@ -53,12 +53,12 @@ export const ToolsDashboard = () => {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="pingen" className="mt-0 animate-fade-in">
-            <PinGenTool />
-          </TabsContent>
-
           <TabsContent value="videogen" className="mt-0 animate-fade-in">
             <VideoGenTool />
+          </TabsContent>
+
+          <TabsContent value="pingen" className="mt-0 animate-fade-in">
+            <PinGenTool />
           </TabsContent>
 
           <TabsContent value="soragen" className="mt-0 animate-fade-in">

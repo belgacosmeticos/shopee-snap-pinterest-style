@@ -193,42 +193,27 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
 
   return (
     <Card className="p-6 md:p-8 shadow-card gradient-card max-w-2xl mx-auto">
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Product URL (Optional) */}
-        <div className="space-y-2">
-          <Label htmlFor="product-url" className="text-base font-medium flex items-center gap-2">
-            <Link2 className="w-4 h-4 text-coral" />
-            Link do Produto Shopee (opcional)
-          </Label>
-          <Input
-            id="product-url"
-            type="url"
-            placeholder="https://shopee.com.br/..."
-            value={productUrl}
-            onChange={(e) => setProductUrl(e.target.value)}
-            className="h-12 text-base"
-            disabled={isLoading}
-          />
-          <p className="text-xs text-muted-foreground">
-            Opcional: Cole o link do produto para extrair nome e link de afiliado
-          </p>
+      <div className="text-center mb-6">
+        <div className="w-12 h-12 rounded-full bg-coral/10 flex items-center justify-center mx-auto mb-3">
+          <Video className="w-6 h-6 text-coral" />
         </div>
+        <h2 className="text-xl font-display font-semibold">Baixar Vídeos Shopee</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Cole os links dos vídeos para baixar sem marca d'água
+        </p>
+      </div>
 
+      <form onSubmit={handleSubmit} className="space-y-4">
         {/* Video URLs */}
         <div className="space-y-3">
-          <Label className="text-base font-medium flex items-center gap-2">
-            <Video className="w-4 h-4 text-coral" />
-            Links dos Vídeos (Shopee Videos)
-          </Label>
-          
           {videoUrls.map((url, index) => (
             <div key={index} className="flex gap-2">
               <Input
                 type="url"
-                placeholder={`https://br.shp.ee/... (Vídeo ${index + 1})`}
+                placeholder={`Cole o link do vídeo ${index + 1}...`}
                 value={url}
                 onChange={(e) => handleVideoUrlChange(index, e.target.value)}
-                className="flex-1"
+                className="flex-1 h-11"
                 disabled={isLoading}
               />
               {videoUrls.length > 1 && (
@@ -238,6 +223,7 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
                   size="icon"
                   onClick={() => removeVideoUrl(index)}
                   disabled={isLoading}
+                  className="h-11 w-11"
                 >
                   <X className="w-4 h-4" />
                 </Button>
@@ -248,20 +234,16 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
           {videoUrls.length < 5 && (
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={addVideoUrl}
               disabled={isLoading}
-              className="gap-2"
+              className="gap-2 text-muted-foreground hover:text-foreground"
             >
               <Plus className="w-4 h-4" />
               Adicionar mais vídeo
             </Button>
           )}
-
-          <p className="text-xs text-muted-foreground">
-            Cole os links dos vídeos de afiliados da seção "Aprenda com criadores"
-          </p>
         </div>
 
         {/* Error Message */}
@@ -280,7 +262,7 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
           {isLoading ? (
             <>
               <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-              {extractingProduct ? 'Extraindo produto...' : extractingVideos ? 'Extraindo vídeos...' : 'Processando...'}
+              {extractingVideos ? 'Extraindo vídeos...' : 'Processando...'}
             </>
           ) : (
             <>
@@ -289,6 +271,27 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
             </>
           )}
         </Button>
+
+        {/* Optional: Product link info */}
+        <details className="text-xs text-muted-foreground">
+          <summary className="cursor-pointer hover:text-foreground flex items-center gap-1">
+            <Link2 className="w-3 h-3" />
+            Quer extrair link de afiliado também?
+          </summary>
+          <div className="mt-2 space-y-2 pl-4 border-l-2 border-muted">
+            <Input
+              type="url"
+              placeholder="Cole o link do produto Shopee (opcional)"
+              value={productUrl}
+              onChange={(e) => setProductUrl(e.target.value)}
+              className="h-10 text-sm"
+              disabled={isLoading}
+            />
+            <p className="text-xs">
+              O link do produto extrai o nome e link de afiliado automaticamente
+            </p>
+          </div>
+        </details>
       </form>
     </Card>
   );
