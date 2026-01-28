@@ -58,39 +58,43 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
     setError('');
     setIsSubmitting(true);
 
-    if (!productUrl.trim()) {
-      setError('Por favor, insira o link do produto');
-      return;
-    }
+    // Link do produto é opcional
+    const hasProductUrl = productUrl.trim().length > 0;
 
     const validVideoUrls = videoUrls.filter(url => url.trim());
     if (validVideoUrls.length === 0) {
       setError('Por favor, insira pelo menos um link de vídeo');
+      setIsSubmitting(false);
       return;
     }
 
     setIsLoading(true);
-    setExtractingProduct(true);
 
     try {
-      // Extract product data
-      console.log('[VideoUrlInputStep] Extracting product data from:', productUrl);
-      const { data: productData, error: productError } = await supabase.functions.invoke('extract-shopee', {
-        body: { url: productUrl }
-      });
+      // Extract product data only if URL is provided
+      let productTitle = 'Vídeo Shopee';
+      let affiliateLink: string | undefined;
+      let originalLink: string | undefined;
 
-      setExtractingProduct(false);
+      if (hasProductUrl) {
+        setExtractingProduct(true);
+        console.log('[VideoUrlInputStep] Extracting product data from:', productUrl);
+        const { data: productData, error: productError } = await supabase.functions.invoke('extract-shopee', {
+          body: { url: productUrl }
+        });
+        setExtractingProduct(false);
 
-      if (productError) {
-        console.error('[VideoUrlInputStep] Product extraction error:', productError);
-        throw new Error('Erro ao extrair dados do produto');
+        if (!productError && productData?.success) {
+          productTitle = productData.title || 'Produto Shopee';
+          affiliateLink = productData.affiliateLink;
+          originalLink = productData.originalLink || productUrl;
+          console.log('[VideoUrlInputStep] Product data:', productData);
+        } else {
+          console.log('[VideoUrlInputStep] Product extraction failed, using defaults');
+        }
+      } else {
+        console.log('[VideoUrlInputStep] No product URL, skipping product extraction');
       }
-
-      if (!productData?.success) {
-        throw new Error(productData?.error || 'Não foi possível extrair o produto');
-      }
-
-      console.log('[VideoUrlInputStep] Product data:', productData);
 
       // Extract video data
       setExtractingVideos(true);
@@ -159,9 +163,9 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
       }
 
       onSubmit({
-        title: productData.title || 'Produto Shopee',
-        affiliateLink: productData.affiliateLink,
-        originalLink: productData.originalLink || productUrl,
+        title: productTitle,
+        affiliateLink: affiliateLink,
+        originalLink: originalLink,
         videos: extractedVideos,
       });
 
@@ -182,11 +186,11 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
   return (
     <Card className="p-6 md:p-8 shadow-card gradient-card max-w-2xl mx-auto">
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Product URL */}
+        {/* Product URL (Optional) */}
         <div className="space-y-2">
           <Label htmlFor="product-url" className="text-base font-medium flex items-center gap-2">
             <Link2 className="w-4 h-4 text-coral" />
-            Link do Produto Shopee
+            Link do Produto Shopee (opcional)
           </Label>
           <Input
             id="product-url"
@@ -198,7 +202,7 @@ export const VideoUrlInputStep = ({ onSubmit, isLoading, setIsLoading }: VideoUr
             disabled={isLoading}
           />
           <p className="text-xs text-muted-foreground">
-            Cole o link do produto da Shopee para extrair o nome e link de afiliado
+            Opcional: Cole o link do produto para extrair nome e link de afiliado
           </p>
         </div>
 
