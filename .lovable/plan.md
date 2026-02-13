@@ -1,146 +1,68 @@
 
 
-## Plano: Implementar Ferramenta Seedance 2.0
+## Implementar Ferramenta Seedance 2.0
 
-### Resumo
+### Passo 1: Configurar Secret
+- Salvar `XSKILL_API_KEY` com o valor fornecido como secret do projeto
 
-Adicionar uma nova aba "Seedance" ao dashboard que permite gerar videos com IA usando o modelo Seedance 2.0 da ByteDance, via API do xskill.ai.
+### Passo 2: Criar Edge Functions
 
----
+**`supabase/functions/seedance-create/index.ts`**
+- Recebe: prompt, mediaFiles (opcional), aspectRatio, duration, mode
+- Chama POST `https://api.xskill.ai/api/v3/tasks/create` com Bearer token
+- Body: model `st-ai/super-seed2`, params com prompt, media_files, aspect_ratio, duration, model (Fast/Standard)
+- Retorna task_id e price
 
-### Pre-requisito
+**`supabase/functions/seedance-query/index.ts`**
+- Recebe: taskId
+- Chama POST `https://api.xskill.ai/api/v3/tasks/query`
+- Retorna status (pending/processing/completed/failed) e videoUrl quando completo
 
-Sera necessario criar uma conta em [xskill.ai](https://www.xskill.ai/) e obter uma API Key. Vou solicitar o secret `XSKILL_API_KEY` antes de implementar.
+### Passo 3: Registrar Functions no config.toml
+- Adicionar `[functions.seedance-create]` e `[functions.seedance-query]` com `verify_jwt = false`
 
----
+### Passo 4: Criar Componentes Frontend
 
-### Arquivos a Criar
-
-**1. `supabase/functions/seedance-create/index.ts`**
-- Edge function que recebe prompt, media_files, aspect_ratio, duration
-- Chama `POST https://api.xskill.ai/api/v3/tasks/create` com Bearer token
-- Retorna o `task_id`
-
-**2. `supabase/functions/seedance-query/index.ts`**
-- Edge function que recebe `task_id`
-- Chama `POST https://api.xskill.ai/api/v3/tasks/query`
-- Retorna status e URL do video quando completo
-
-**3. `src/components/SeedanceTool.tsx`**
-- Componente principal da ferramenta
-- Gerencia estados: input, generating, result
-
-**4. `src/components/steps/SeedanceInputStep.tsx`**
-- Campo de texto para o prompt
-- Upload/URL de imagens e videos de referencia (opcional)
+**`src/components/steps/SeedanceInputStep.tsx`**
+- Campo de texto para prompt
+- Campo para URLs de imagens/videos de referencia (opcional)
 - Seletor de aspect ratio (16:9, 9:16, 1:1)
-- Seletor de duracao (4-15 segundos)
+- Slider de duracao (5-10 segundos)
 - Seletor de modo (Fast/Standard)
+- Botao "Gerar Video"
 
-**5. `src/components/steps/SeedanceResultStep.tsx`**
+**`src/components/steps/SeedanceResultStep.tsx`**
 - Player de video com o resultado
 - Botao de download
-- Botao para gerar novo
+- Botao para gerar novo video
 
----
+**`src/components/SeedanceTool.tsx`**
+- Gerencia 3 estados: input, generating (com polling a cada 5s), result
+- Tela de loading com barra de progresso e status atual
+- Timeout de 3 minutos
 
-### Arquivos a Modificar
+### Passo 5: Integrar no Dashboard
 
-**1. `src/components/ToolsDashboard.tsx`**
-- Adicionar nova aba "Seedance" com icone de Clapperboard
-- Grid passa de 5 para 6 colunas
-
-**2. `supabase/config.toml`**
-- Adicionar configuracao das duas novas functions com `verify_jwt = false`
-
----
-
-### Fluxo da Ferramenta
-
-```text
-Tela de Input
-  [Prompt: "Uma astronauta caminhando em Marte..."]
-  [Imagens/Videos de referencia (opcional)]
-  [Aspect Ratio: 16:9 | 9:16 | 1:1]
-  [Duracao: 5s]
-  [Modo: Fast | Standard]
-  [Gerar Video]
-        |
-        v
-Edge Function: seedance-create
-  POST api.xskill.ai/api/v3/tasks/create
-  -> retorna task_id
-        |
-        v
-Tela de Loading (com polling)
-  A cada 5 segundos:
-  Edge Function: seedance-query
-  POST api.xskill.ai/api/v3/tasks/query
-  -> status: pending/processing/completed/failed
-        |
-        v
-Tela de Resultado
-  [Player de Video]
-  [Baixar Video]
-  [Gerar Novo]
-```
-
----
+**`src/components/ToolsDashboard.tsx`**
+- Adicionar aba "Seedance" com icone Clapperboard
+- Grid de tabs passa de 5 para 6 colunas
 
 ### Detalhes Tecnicos
 
-**Edge Function `seedance-create`:**
-```typescript
-// Recebe: { prompt, mediaFiles?, aspectRatio?, duration?, mode? }
-// Chama: POST https://api.xskill.ai/api/v3/tasks/create
-// Body: {
-//   model: "st-ai/super-seed2",
-//   params: {
-//     prompt: "...",
-//     media_files: [...],
-//     aspect_ratio: "16:9",
-//     duration: "5",
-//     model: "Fast"
-//   }
-// }
-// Retorna: { taskId, price }
-```
+- Polling a cada 5 segundos para consultar status da task
+- Progresso visual: pending -> processing -> completed
+- Timeout maximo de 3 minutos com mensagem de erro
+- Tratamento de erro para status "failed"
+- Sintaxe `@imagem1`, `@video1` no prompt para referenciar arquivos em media_files
 
-**Edge Function `seedance-query`:**
-```typescript
-// Recebe: { taskId }
-// Chama: POST https://api.xskill.ai/api/v3/tasks/query
-// Retorna: { status, videoUrl? }
-// status: "pending" | "processing" | "completed" | "failed"
-```
-
-**Frontend - Polling:**
-- Apos criar task, faz polling a cada 5 segundos
-- Mostra progresso visual (pending -> processing -> completed)
-- Timeout de 3 minutos maximo
-- Tratamento de erro se status = "failed"
-
-**Sintaxe de referencia de midia:**
-- O prompt suporta `@imagem1`, `@video1` para referenciar arquivos em media_files
-- O frontend vai instruir o usuario sobre essa sintaxe
-
----
-
-### Secret Necessario
-
-- `XSKILL_API_KEY` - API Key obtida em xskill.ai
-
----
-
-### Resumo de Mudancas
-
-| Tipo | Arquivo | Descricao |
-|------|---------|-----------|
-| Criar | `supabase/functions/seedance-create/index.ts` | Criar task de geracao de video |
-| Criar | `supabase/functions/seedance-query/index.ts` | Consultar status da task |
-| Criar | `src/components/SeedanceTool.tsx` | Componente principal |
-| Criar | `src/components/steps/SeedanceInputStep.tsx` | Tela de input |
-| Criar | `src/components/steps/SeedanceResultStep.tsx` | Tela de resultado |
-| Modificar | `src/components/ToolsDashboard.tsx` | Adicionar aba Seedance |
-| Modificar | `supabase/config.toml` | Config das novas functions |
+| Tipo | Arquivo |
+|------|---------|
+| Secret | XSKILL_API_KEY |
+| Criar | supabase/functions/seedance-create/index.ts |
+| Criar | supabase/functions/seedance-query/index.ts |
+| Criar | src/components/SeedanceTool.tsx |
+| Criar | src/components/steps/SeedanceInputStep.tsx |
+| Criar | src/components/steps/SeedanceResultStep.tsx |
+| Modificar | src/components/ToolsDashboard.tsx |
+| Modificar | supabase/config.toml |
 
