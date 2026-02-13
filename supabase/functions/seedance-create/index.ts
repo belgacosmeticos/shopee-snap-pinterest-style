@@ -54,17 +54,30 @@ serve(async (req) => {
     });
 
     const data = await response.json();
+    console.log("xskill API full response:", JSON.stringify(data));
 
     if (!response.ok) {
       console.error("xskill API error:", response.status, data);
-      return new Response(JSON.stringify({ error: data.message || "Failed to create task" }), {
+      return new Response(JSON.stringify({ error: data.message || data.error || "Failed to create task", details: data }), {
         status: response.status,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
+    // Try multiple possible field names for task ID
+    const taskId = data.task_id || data.taskId || data.id || data.data?.task_id || data.data?.id;
+    console.log("Extracted taskId:", taskId);
+
+    if (!taskId) {
+      console.error("No task_id found in response:", data);
+      return new Response(JSON.stringify({ error: "No task_id in API response", details: data }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     return new Response(JSON.stringify({
-      taskId: data.task_id,
+      taskId,
       price: data.price,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

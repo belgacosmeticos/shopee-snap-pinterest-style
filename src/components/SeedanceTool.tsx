@@ -105,7 +105,7 @@ export const SeedanceTool = () => {
       if (result.error) throw new Error(result.error);
 
       const taskId = result.taskId;
-      if (!taskId) throw new Error('Nenhum task_id retornado');
+      if (!taskId) throw new Error(`Nenhum task_id retornado. Resposta: ${JSON.stringify(result)}`);
 
       setStatus('Na fila...');
       setProgress(10);
