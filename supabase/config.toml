@@ -72,3 +72,6 @@ verify_jwt = false
 
 [functions.seedance-query]
 verify_jwt = false
+
+[functions.seedance-upload]
+verify_jwt = false
