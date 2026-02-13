@@ -25,11 +25,16 @@ serve(async (req) => {
       });
     }
 
+    const modelMap: Record<string, string> = {
+      "Fast": "seedance_2.0_fast",
+      "Standard": "seedance_2.0",
+    };
+
     const params: Record<string, unknown> = {
       prompt,
       aspect_ratio: aspectRatio || "16:9",
       duration: String(duration || 5),
-      model: mode || "Fast",
+      model: modelMap[mode] || "seedance_2.0_fast",
     };
 
     if (mediaFiles && mediaFiles.length > 0) {
