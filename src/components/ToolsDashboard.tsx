@@ -4,8 +4,9 @@ import { PinGenTool } from './PinGenTool';
 import { VideoGenTool } from './VideoGenTool';
 import { SoraGenTool } from './SoraGenTool';
 import { VideoMinerTool } from './VideoMinerTool';
+import { SeedanceTool } from './SeedanceTool';
 import { UsageAnalytics } from './UsageAnalytics';
-import { ImageIcon, Video, Sparkles, Search, BarChart3 } from 'lucide-react';
+import { ImageIcon, Video, Sparkles, Search, BarChart3, Clapperboard } from 'lucide-react';
 
 export const ToolsDashboard = () => {
   const [activeTab, setActiveTab] = useState('videogen');
@@ -25,7 +26,7 @@ export const ToolsDashboard = () => {
 
         {/* Tool Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full max-w-3xl mx-auto grid-cols-5 mb-6 h-12">
+          <TabsList className="grid w-full max-w-3xl mx-auto grid-cols-6 mb-6 h-12">
             <TabsTrigger value="videogen" className="gap-2 text-xs md:text-sm">
               <Video className="w-4 h-4" />
               <span className="hidden sm:inline">VideoGen</span>
@@ -40,6 +41,11 @@ export const ToolsDashboard = () => {
               <Sparkles className="w-4 h-4" />
               <span className="hidden sm:inline">SoraGen</span>
               <span className="sm:hidden">Sora</span>
+            </TabsTrigger>
+            <TabsTrigger value="seedance" className="gap-2 text-xs md:text-sm">
+              <Clapperboard className="w-4 h-4" />
+              <span className="hidden sm:inline">Seedance</span>
+              <span className="sm:hidden">Seed</span>
             </TabsTrigger>
             <TabsTrigger value="videominer" className="gap-2 text-xs md:text-sm">
               <Search className="w-4 h-4" />
@@ -63,6 +69,10 @@ export const ToolsDashboard = () => {
 
           <TabsContent value="soragen" className="mt-0 animate-fade-in">
             <SoraGenTool />
+          </TabsContent>
+
+          <TabsContent value="seedance" className="mt-0 animate-fade-in">
+            <SeedanceTool />
           </TabsContent>
 
           <TabsContent value="videominer" className="mt-0 animate-fade-in">
