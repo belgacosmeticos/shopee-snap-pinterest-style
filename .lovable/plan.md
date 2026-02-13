@@ -1,265 +1,146 @@
 
 
-## Plano: Extração Automática de Link de Afiliado + Sistema de Usuários
+## Plano: Implementar Ferramenta Seedance 2.0
 
 ### Resumo
 
-Vamos implementar duas funcionalidades:
-1. **Extração automática de link de afiliado** do link do vídeo Shopee
-2. **Sistema de dois usuários** com PINs diferentes e APIs Shopee diferentes
+Adicionar uma nova aba "Seedance" ao dashboard que permite gerar videos com IA usando o modelo Seedance 2.0 da ByteDance, via API do xskill.ai.
 
 ---
 
-## Funcionalidade 1: Extração Automática de Link de Afiliado
+### Pre-requisito
 
-### Como Funciona
-
-Quando o usuário cola um link de vídeo Shopee (ex: `https://br.shp.ee/c1679w0?smtt=0.0.9`), o sistema irá:
-
-1. Seguir os redirects do link curto
-2. Identificar o `shop_id` e `item_id` do produto associado ao vídeo
-3. Usar a API de Afiliados da Shopee para gerar o link de afiliado automaticamente
-4. Retornar o link de afiliado junto com o vídeo sem marca d'água
-
-### Mudanças Técnicas
-
-| Arquivo | Mudança |
-|---------|---------|
-| `supabase/functions/extract-shopee-video/index.ts` | Adicionar extração de product ID do vídeo e geração de link de afiliado |
-| `src/components/steps/VideoUrlInputStep.tsx` | Remover seção "Quer extrair link de afiliado?" (será automático) |
-| `src/components/VideoGenTool.tsx` | Atualizar tipagem para incluir `affiliateLink` no retorno |
-| `src/components/steps/VideoResultStep.tsx` | Exibir link de afiliado automaticamente quando disponível |
-
-### Detalhes da Implementação
-
-**Edge Function `extract-shopee-video`:**
-
-```typescript
-// Adicionar ao início do arquivo
-async function generateAffiliateLink(appId: string, appSecret: string, originalUrl: string, userId?: string): Promise<string | null> {
-  // Reutilizar lógica do extract-shopee
-  // Usar userId como subId para rastrear qual usuário gerou o link
-}
-
-// Adicionar ao final de extractVideoInfo
-async function extractVideoInfo(url: string, userId?: string): Promise<VideoInfo> {
-  // ... código existente ...
-  
-  // NOVO: Tentar extrair link de afiliado do produto
-  const appId = Deno.env.get('SHOPEE_APP_ID');
-  const appSecret = Deno.env.get('SHOPEE_APP_SECRET');
-  
-  // Se for usuário Paula, usar credenciais diferentes
-  const finalAppId = userId === 'paula' 
-    ? Deno.env.get('SHOPEE_APP_ID_PAULA') 
-    : appId;
-  const finalAppSecret = userId === 'paula' 
-    ? Deno.env.get('SHOPEE_APP_SECRET_PAULA') 
-    : appSecret;
-  
-  if (finalAppId && finalAppSecret) {
-    // Usar a URL final (sv.shopee) para gerar link de afiliado
-    const affiliateLink = await generateAffiliateLink(finalAppId, finalAppSecret, svShopeeUrl || finalUrl, userId);
-    if (affiliateLink) {
-      result.affiliateLink = affiliateLink;
-      result.productLink = svShopeeUrl || finalUrl;
-    }
-  }
-  
-  return result;
-}
-```
+Sera necessario criar uma conta em [xskill.ai](https://www.xskill.ai/) e obter uma API Key. Vou solicitar o secret `XSKILL_API_KEY` antes de implementar.
 
 ---
-
-## Funcionalidade 2: Sistema de Dois Usuários
-
-### Como Funciona
-
-| PIN | Usuário | API Shopee |
-|-----|---------|------------|
-| `042721` | Usuário Padrão | `SHOPEE_APP_ID` + `SHOPEE_APP_SECRET` |
-| `0131` | Paula | `SHOPEE_APP_ID_PAULA` + `SHOPEE_APP_SECRET_PAULA` |
-
-### Mudanças Técnicas
-
-| Arquivo | Mudança |
-|---------|---------|
-| `src/components/PinAuth.tsx` | Adicionar suporte a múltiplos PINs e identificar usuário |
-| `src/hooks/useCurrentUser.ts` | Novo hook para gerenciar contexto do usuário atual |
-| `src/components/steps/VideoUrlInputStep.tsx` | Passar `userId` para a edge function |
-| `supabase/functions/extract-shopee-video/index.ts` | Usar credenciais corretas baseado no `userId` |
-
-### Detalhes da Implementação
-
-**1. Novo Hook `useCurrentUser.ts`:**
-
-```typescript
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-
-interface User {
-  id: string;
-  name: string;
-}
-
-interface UserContextType {
-  user: User | null;
-  setUser: (user: User | null) => void;
-}
-
-const UserContext = createContext<UserContextType | undefined>(undefined);
-
-export const UserProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(() => {
-    const session = localStorage.getItem('shopee_tools_auth');
-    if (session) {
-      const data = JSON.parse(session);
-      return data.user || null;
-    }
-    return null;
-  });
-
-  return (
-    <UserContext.Provider value={{ user, setUser }}>
-      {children}
-    </UserContext.Provider>
-  );
-};
-
-export const useCurrentUser = () => {
-  const context = useContext(UserContext);
-  if (!context) throw new Error('useCurrentUser must be used within UserProvider');
-  return context;
-};
-```
-
-**2. Atualização do `PinAuth.tsx`:**
-
-```typescript
-const VALID_PINS: Record<string, { id: string; name: string }> = {
-  '042721': { id: 'default', name: 'Usuário' },
-  '0131': { id: 'paula', name: 'Paula' },
-};
-
-const handleSubmit = (e: React.FormEvent) => {
-  e.preventDefault();
-  
-  const userInfo = VALID_PINS[pin];
-  
-  if (userInfo) {
-    const session = {
-      authenticated: true,
-      expiry: Date.now() + SESSION_DURATION,
-      user: userInfo,
-    };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-    setUser(userInfo); // Do contexto
-    setIsAuthenticated(true);
-    toast.success(`Bem-vinda, ${userInfo.name}! Sessão válida por 24 horas.`);
-  } else {
-    toast.error('PIN incorreto. Tente novamente.');
-    setPin('');
-  }
-};
-```
-
-**3. Atualização do `VideoUrlInputStep.tsx`:**
-
-```typescript
-import { useCurrentUser } from '@/hooks/useCurrentUser';
-
-export const VideoUrlInputStep = ({ ... }) => {
-  const { user } = useCurrentUser();
-  
-  // Na chamada da edge function:
-  const { data: videoData, error: videoError } = await supabase.functions.invoke('extract-shopee-video', {
-    body: { 
-      url: videoUrl,
-      userId: user?.id // Passar ID do usuário
-    }
-  });
-};
-```
-
-**4. Novos Secrets Necessários:**
-
-Será necessário adicionar dois novos secrets para a Paula:
-- `SHOPEE_APP_ID_PAULA`
-- `SHOPEE_APP_SECRET_PAULA`
-
----
-
-## Fluxo Atualizado
-
-```text
-┌──────────────────────────────────────┐
-│        Tela de Login (PIN)           │
-│                                      │
-│  PIN: 042721 → Usuário Padrão        │
-│  PIN: 0131   → Paula                 │
-└──────────────────────────────────────┘
-                    │
-                    ▼
-┌──────────────────────────────────────┐
-│       Dashboard de Ferramentas       │
-│      (exibe nome do usuário)         │
-└──────────────────────────────────────┘
-                    │
-                    ▼
-┌──────────────────────────────────────┐
-│     VideoGen - Baixar Vídeos         │
-│                                      │
-│  [Cole os links dos vídeos...]       │
-│                                      │
-│  [Extrair Vídeos]                    │
-└──────────────────────────────────────┘
-                    │
-                    ▼
-┌──────────────────────────────────────┐
-│   Edge Function: extract-shopee-video│
-│                                      │
-│  1. Extrair vídeo sem marca d'água   │
-│  2. Identificar product_id           │
-│  3. Gerar link de afiliado           │
-│     (usando API do usuário correto)  │
-└──────────────────────────────────────┘
-                    │
-                    ▼
-┌──────────────────────────────────────┐
-│         Resultado                    │
-│                                      │
-│  📹 Vídeo sem marca d'água           │
-│  💰 Link de Afiliado (automático!)   │
-│  📋 Legenda                          │
-│                                      │
-│  [Baixar] [Compartilhar] [FB Reel]   │
-└──────────────────────────────────────┘
-```
-
----
-
-## Resumo das Mudanças
 
 ### Arquivos a Criar
-1. `src/hooks/useCurrentUser.tsx` - Contexto do usuário atual
 
-### Arquivos a Modificar
-1. `src/components/PinAuth.tsx` - Suporte a múltiplos PINs
-2. `src/pages/Index.tsx` - Wrapping com UserProvider
-3. `src/components/steps/VideoUrlInputStep.tsx` - Passar userId, remover seção opcional
-4. `src/components/VideoGenTool.tsx` - Atualizar tipagem ExtractedVideo
-5. `src/components/steps/VideoResultStep.tsx` - Exibir link de afiliado do vídeo
-6. `supabase/functions/extract-shopee-video/index.ts` - Adicionar geração de link de afiliado
+**1. `supabase/functions/seedance-create/index.ts`**
+- Edge function que recebe prompt, media_files, aspect_ratio, duration
+- Chama `POST https://api.xskill.ai/api/v3/tasks/create` com Bearer token
+- Retorna o `task_id`
 
-### Secrets a Adicionar
-- `SHOPEE_APP_ID_PAULA`
-- `SHOPEE_APP_SECRET_PAULA`
+**2. `supabase/functions/seedance-query/index.ts`**
+- Edge function que recebe `task_id`
+- Chama `POST https://api.xskill.ai/api/v3/tasks/query`
+- Retorna status e URL do video quando completo
+
+**3. `src/components/SeedanceTool.tsx`**
+- Componente principal da ferramenta
+- Gerencia estados: input, generating, result
+
+**4. `src/components/steps/SeedanceInputStep.tsx`**
+- Campo de texto para o prompt
+- Upload/URL de imagens e videos de referencia (opcional)
+- Seletor de aspect ratio (16:9, 9:16, 1:1)
+- Seletor de duracao (4-15 segundos)
+- Seletor de modo (Fast/Standard)
+
+**5. `src/components/steps/SeedanceResultStep.tsx`**
+- Player de video com o resultado
+- Botao de download
+- Botao para gerar novo
 
 ---
 
-## Próximos Passos
+### Arquivos a Modificar
 
-Após aprovação, vou:
-1. Solicitar que você adicione os secrets `SHOPEE_APP_ID_PAULA` e `SHOPEE_APP_SECRET_PAULA`
-2. Implementar as mudanças em código
+**1. `src/components/ToolsDashboard.tsx`**
+- Adicionar nova aba "Seedance" com icone de Clapperboard
+- Grid passa de 5 para 6 colunas
+
+**2. `supabase/config.toml`**
+- Adicionar configuracao das duas novas functions com `verify_jwt = false`
+
+---
+
+### Fluxo da Ferramenta
+
+```text
+Tela de Input
+  [Prompt: "Uma astronauta caminhando em Marte..."]
+  [Imagens/Videos de referencia (opcional)]
+  [Aspect Ratio: 16:9 | 9:16 | 1:1]
+  [Duracao: 5s]
+  [Modo: Fast | Standard]
+  [Gerar Video]
+        |
+        v
+Edge Function: seedance-create
+  POST api.xskill.ai/api/v3/tasks/create
+  -> retorna task_id
+        |
+        v
+Tela de Loading (com polling)
+  A cada 5 segundos:
+  Edge Function: seedance-query
+  POST api.xskill.ai/api/v3/tasks/query
+  -> status: pending/processing/completed/failed
+        |
+        v
+Tela de Resultado
+  [Player de Video]
+  [Baixar Video]
+  [Gerar Novo]
+```
+
+---
+
+### Detalhes Tecnicos
+
+**Edge Function `seedance-create`:**
+```typescript
+// Recebe: { prompt, mediaFiles?, aspectRatio?, duration?, mode? }
+// Chama: POST https://api.xskill.ai/api/v3/tasks/create
+// Body: {
+//   model: "st-ai/super-seed2",
+//   params: {
+//     prompt: "...",
+//     media_files: [...],
+//     aspect_ratio: "16:9",
+//     duration: "5",
+//     model: "Fast"
+//   }
+// }
+// Retorna: { taskId, price }
+```
+
+**Edge Function `seedance-query`:**
+```typescript
+// Recebe: { taskId }
+// Chama: POST https://api.xskill.ai/api/v3/tasks/query
+// Retorna: { status, videoUrl? }
+// status: "pending" | "processing" | "completed" | "failed"
+```
+
+**Frontend - Polling:**
+- Apos criar task, faz polling a cada 5 segundos
+- Mostra progresso visual (pending -> processing -> completed)
+- Timeout de 3 minutos maximo
+- Tratamento de erro se status = "failed"
+
+**Sintaxe de referencia de midia:**
+- O prompt suporta `@imagem1`, `@video1` para referenciar arquivos em media_files
+- O frontend vai instruir o usuario sobre essa sintaxe
+
+---
+
+### Secret Necessario
+
+- `XSKILL_API_KEY` - API Key obtida em xskill.ai
+
+---
+
+### Resumo de Mudancas
+
+| Tipo | Arquivo | Descricao |
+|------|---------|-----------|
+| Criar | `supabase/functions/seedance-create/index.ts` | Criar task de geracao de video |
+| Criar | `supabase/functions/seedance-query/index.ts` | Consultar status da task |
+| Criar | `src/components/SeedanceTool.tsx` | Componente principal |
+| Criar | `src/components/steps/SeedanceInputStep.tsx` | Tela de input |
+| Criar | `src/components/steps/SeedanceResultStep.tsx` | Tela de resultado |
+| Modificar | `src/components/ToolsDashboard.tsx` | Adicionar aba Seedance |
+| Modificar | `supabase/config.toml` | Config das novas functions |
 
