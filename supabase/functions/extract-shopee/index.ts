@@ -585,11 +585,16 @@ async function tryShopeeApi(itemId: string, shopId: string, referer: string): Pr
           }
 
           if (images.length > 0) {
-            console.log(`✅ SUCCESS with ${endpoint.name}: Found ${images.length} total images`);
+            const rawPrice = itemData.price_min || itemData.price || itemData.item_basic?.price_min;
+            const price = rawPrice ? rawPrice / 100000 : undefined;
+            const description = itemData.description || itemData.item_basic?.description || '';
+            console.log(`✅ SUCCESS with ${endpoint.name}: Found ${images.length} total images, price: ${price}`);
             return {
               title: title,
               images: images,
-              success: true
+              success: true,
+              price,
+              description
             };
           }
         }

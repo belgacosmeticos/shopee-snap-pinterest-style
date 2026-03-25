@@ -85,6 +85,10 @@ export const ToolsDashboard = () => {
             <VideoMinerTool />
           </TabsContent>
 
+          <TabsContent value="shopify" className="mt-0 animate-fade-in">
+            <ShopifyScraperTool />
+          </TabsContent>
+
           <TabsContent value="analytics" className="mt-0 animate-fade-in">
             <UsageAnalytics />
           </TabsContent>
