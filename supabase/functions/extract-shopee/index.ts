@@ -357,7 +357,8 @@ async function searchWithAffiliateApi(appId: string, appSecret: string, keyword:
           title: exactProduct.productName || '',
           images,
           success: true,
-          affiliateLink: exactProduct.offerLink || undefined
+          affiliateLink: exactProduct.offerLink || undefined,
+          price: exactProduct.price ? parseFloat(exactProduct.price) : undefined
         };
       } else {
         console.log('⚠️ No exact match found for itemId:', itemId);
