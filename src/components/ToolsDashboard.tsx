@@ -6,7 +6,8 @@ import { SoraGenTool } from './SoraGenTool';
 import { VideoMinerTool } from './VideoMinerTool';
 import { SeedanceTool } from './SeedanceTool';
 import { UsageAnalytics } from './UsageAnalytics';
-import { ImageIcon, Video, Sparkles, Search, BarChart3, Clapperboard } from 'lucide-react';
+import { ShopifyScraperTool } from './ShopifyScraperTool';
+import { ImageIcon, Video, Sparkles, Search, BarChart3, Clapperboard, ShoppingBag } from 'lucide-react';
 
 export const ToolsDashboard = () => {
   const [activeTab, setActiveTab] = useState('videogen');
@@ -26,7 +27,7 @@ export const ToolsDashboard = () => {
 
         {/* Tool Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full max-w-3xl mx-auto grid-cols-6 mb-6 h-12">
+          <TabsList className="grid w-full max-w-3xl mx-auto grid-cols-7 mb-6 h-12">
             <TabsTrigger value="videogen" className="gap-2 text-xs md:text-sm">
               <Video className="w-4 h-4" />
               <span className="hidden sm:inline">VideoGen</span>
@@ -51,6 +52,11 @@ export const ToolsDashboard = () => {
               <Search className="w-4 h-4" />
               <span className="hidden sm:inline">VideoMiner</span>
               <span className="sm:hidden">Miner</span>
+            </TabsTrigger>
+            <TabsTrigger value="shopify" className="gap-2 text-xs md:text-sm">
+              <ShoppingBag className="w-4 h-4" />
+              <span className="hidden sm:inline">Shopify</span>
+              <span className="sm:hidden">Shop</span>
             </TabsTrigger>
             <TabsTrigger value="analytics" className="gap-2 text-xs md:text-sm">
               <BarChart3 className="w-4 h-4" />
@@ -77,6 +83,10 @@ export const ToolsDashboard = () => {
 
           <TabsContent value="videominer" className="mt-0 animate-fade-in">
             <VideoMinerTool />
+          </TabsContent>
+
+          <TabsContent value="shopify" className="mt-0 animate-fade-in">
+            <ShopifyScraperTool />
           </TabsContent>
 
           <TabsContent value="analytics" className="mt-0 animate-fade-in">
