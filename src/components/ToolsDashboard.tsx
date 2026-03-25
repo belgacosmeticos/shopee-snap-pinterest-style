@@ -6,7 +6,8 @@ import { SoraGenTool } from './SoraGenTool';
 import { VideoMinerTool } from './VideoMinerTool';
 import { SeedanceTool } from './SeedanceTool';
 import { UsageAnalytics } from './UsageAnalytics';
-import { ImageIcon, Video, Sparkles, Search, BarChart3, Clapperboard } from 'lucide-react';
+import { ShopifyScraperTool } from './ShopifyScraperTool';
+import { ImageIcon, Video, Sparkles, Search, BarChart3, Clapperboard, ShoppingBag } from 'lucide-react';
 
 export const ToolsDashboard = () => {
   const [activeTab, setActiveTab] = useState('videogen');
