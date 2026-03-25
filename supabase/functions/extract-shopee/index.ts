@@ -63,6 +63,8 @@ interface ExtractionResult {
   error?: string;
   affiliateLink?: string;
   originalLink?: string;
+  price?: number;
+  description?: string;
 }
 
 async function extractFromShopee(url: string): Promise<ExtractionResult> {
