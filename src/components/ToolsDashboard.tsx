@@ -53,6 +53,11 @@ export const ToolsDashboard = () => {
               <span className="hidden sm:inline">VideoMiner</span>
               <span className="sm:hidden">Miner</span>
             </TabsTrigger>
+            <TabsTrigger value="shopify" className="gap-2 text-xs md:text-sm">
+              <ShoppingBag className="w-4 h-4" />
+              <span className="hidden sm:inline">Shopify</span>
+              <span className="sm:hidden">Shop</span>
+            </TabsTrigger>
             <TabsTrigger value="analytics" className="gap-2 text-xs md:text-sm">
               <BarChart3 className="w-4 h-4" />
               <span className="hidden sm:inline">Analytics</span>
