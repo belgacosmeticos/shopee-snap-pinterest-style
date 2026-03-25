@@ -27,7 +27,7 @@ export const ToolsDashboard = () => {
 
         {/* Tool Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full max-w-3xl mx-auto grid-cols-6 mb-6 h-12">
+          <TabsList className="grid w-full max-w-3xl mx-auto grid-cols-7 mb-6 h-12">
             <TabsTrigger value="videogen" className="gap-2 text-xs md:text-sm">
               <Video className="w-4 h-4" />
               <span className="hidden sm:inline">VideoGen</span>
