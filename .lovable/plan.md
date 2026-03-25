@@ -1,77 +1,68 @@
 
 
-## Plano: Corrigir Seedance + Upload de Midia + Duracao ate 15s
+## Ferramenta Shopee Scraper para Importacao Shopify
 
-### Problemas Identificados
+### O que sera construido
 
-1. **Erro "Nenhum task_id retornado"**: A API xskill retornou `{}` (vazio). O problema e que a resposta da API provavelmente usa campos diferentes do esperado (ex: `id` em vez de `task_id`). Preciso adicionar logging para ver a resposta real e mapear corretamente.
+Uma nova aba "Shopify Scraper" no dashboard que permite:
+1. Colar links de produtos Shopee um por um
+2. Extrair automaticamente: titulo, imagens, descricao, preco (x2)
+3. Acumular produtos numa lista editavel
+4. Exportar como CSV no formato exato de importacao Shopify
 
-2. **Upload de midia**: Atualmente so aceita URLs. O usuario quer poder subir imagens/videos por upload ou Ctrl+V (colar).
+### Como funciona
 
-3. **Duracao**: O slider vai ate 10s, mas o Seedance 2.0 suporta ate 15s.
+1. Usuario cola link da Shopee e clica "Adicionar"
+2. Sistema usa a edge function `extract-shopee` existente para extrair dados (titulo, imagens, preco)
+3. O produto aparece numa tabela editavel onde o usuario pode ajustar titulo, preco, etc
+4. Ao final, clica "Exportar CSV" e recebe o arquivo no formato Shopify
 
----
+### Formato CSV Shopify
 
-### Correcoes
+Colunas principais do template de importacao:
 
-**1. Edge Function `seedance-create/index.ts`**
-- Adicionar `console.log` da resposta completa da API xskill para debug
-- Mapear corretamente o campo do task_id (tentar `data.task_id`, `data.id`, `data.data?.task_id`)
-- Retornar a resposta completa em caso de erro para facilitar debug
-
-**2. Criar bucket de storage para midias**
-- Criar um bucket publico `seedance-media` via migracao SQL
-- Adicionar politica RLS para permitir upload anonimo (ferramenta nao usa auth)
-
-**3. Criar Edge Function `seedance-upload/index.ts`**
-- Recebe arquivo via FormData
-- Faz upload para o bucket `seedance-media`
-- Retorna URL publica do arquivo
-
-**4. Atualizar `SeedanceInputStep.tsx`**
-- Adicionar area de drag-and-drop e botao de upload de arquivo
-- Suporte a Ctrl+V (paste) para colar imagens da area de transferencia
-- Preview de imagens/videos adicionados (thumbnail)
-- Manter opcao de URL tambem
-- Alterar slider de duracao: min 5, max 15
-
-**5. Atualizar `SeedanceTool.tsx`**
-- Integrar upload: quando usuario sobe um arquivo, faz upload para storage e usa a URL publica como media_file
-
----
-
-### Detalhes Tecnicos
-
-**Bucket de Storage:**
 ```text
-Nome: seedance-media
-Publico: sim
-RLS: permitir insert para todos (anon)
+Handle, Title, Body (HTML), Vendor, Product Category, Type, Tags,
+Published, Option1 Name, Option1 Value, Variant SKU, Variant Grams,
+Variant Inventory Tracker, Variant Inventory Qty, Variant Inventory Policy,
+Variant Fulfillment Service, Variant Price, Variant Compare At Price,
+Variant Requires Shipping, Variant Taxable, Image Src, Image Position,
+Status
 ```
 
-**Upload por Ctrl+V:**
-- Listener de evento `paste` no componente
-- Extrai imagem do clipboard (`clipboardData.items`)
-- Faz upload automatico para o bucket
-- Mostra preview inline
+- **Preco**: valor extraido x2
+- **Imagens**: cada imagem gera uma linha adicional com mesmo Handle
+- **Status**: "draft" por padrao
+- **Published**: false por padrao
 
-**Upload por arquivo:**
-- Input type="file" aceita imagens e videos
-- Tipos: image/*, video/*
-- Faz upload para o bucket e usa a URL publica
-
-**Duracao:**
-- Slider min: 5s, max: 15s (ao inves de 10s)
-
----
-
-### Arquivos a Modificar/Criar
+### Arquivos a criar/modificar
 
 | Tipo | Arquivo | Descricao |
 |------|---------|-----------|
-| Migracao SQL | Criar bucket seedance-media | Storage para uploads de midia |
-| Modificar | `supabase/functions/seedance-create/index.ts` | Adicionar logging, fix task_id mapping |
-| Modificar | `supabase/config.toml` | Registrar seedance-upload |
-| Modificar | `src/components/steps/SeedanceInputStep.tsx` | Upload, paste, drag-drop, duracao 15s |
-| Modificar | `src/components/SeedanceTool.tsx` | Integrar upload de arquivos |
+| Criar | `src/components/ShopifyScraperTool.tsx` | Componente principal com lista de produtos e botao exportar |
+| Criar | `src/components/steps/ShopifyScraperInput.tsx` | Input de URL + botao adicionar |
+| Criar | `src/lib/shopifyCsvExport.ts` | Funcao para gerar CSV no formato Shopify |
+| Modificar | `src/components/ToolsDashboard.tsx` | Adicionar aba "Shopify" com icone ShoppingBag |
+
+### Detalhes Tecnicos
+
+- Reutiliza a edge function `extract-shopee` ja existente (extrai titulo, imagens, preco)
+- Precisa extrair **preco** alem de imagens - a funcao atual ja retorna `price` pela Affiliate API
+- Estado dos produtos armazenado em memoria (useState) - nao precisa de banco
+- Exportacao CSV gerada no frontend com download direto
+- Cada produto com multiplas imagens gera N linhas no CSV (mesma Handle, Image Src diferente)
+- Grid de tabs passa de 6 para 7 colunas
+
+### Fluxo do usuario
+
+```text
+1. Abre aba "Shopify"
+2. Cola link do produto Shopee
+3. Clica "Adicionar" → extrai dados automaticamente
+4. Produto aparece na lista com: titulo, preco original, preco x2, thumb
+5. Pode editar titulo/preco na lista
+6. Repete passos 2-5 para mais produtos
+7. Clica "Exportar CSV Shopify"
+8. Baixa arquivo .csv pronto para importar no Shopify
+```
 
