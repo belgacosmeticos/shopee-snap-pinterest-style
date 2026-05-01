@@ -75,3 +75,9 @@ verify_jwt = false
 
 [functions.seedance-upload]
 verify_jwt = false
+
+[functions.tiktok-download-single]
+verify_jwt = false
+
+[functions.tiktok-scrape-profile]
+verify_jwt = false
