@@ -1,68 +1,91 @@
+## Ferramenta: TikTok Downloader (sem marca d'água + scraping de perfil)
 
+### O que será construído
 
-## Ferramenta Shopee Scraper para Importacao Shopify
+Nova aba "TikTok" no dashboard com **dois modos**:
 
-### O que sera construido
+1. **Modo Link Único**: cola URL de um vídeo TikTok → baixa sem marca d'água
+2. **Modo Perfil**: cola `@usuario` ou URL do perfil → lista todos os vídeos com thumbnail, views, likes, descrição → permite **filtrar/ordenar** (mais vistos, mais recentes), **selecionar múltiplos** e **baixar todos** em lote (ZIP ou um a um)
 
-Uma nova aba "Shopify Scraper" no dashboard que permite:
-1. Colar links de produtos Shopee um por um
-2. Extrair automaticamente: titulo, imagens, descricao, preco (x2)
-3. Acumular produtos numa lista editavel
-4. Exportar como CSV no formato exato de importacao Shopify
+### Pesquisa de APIs (concluída)
 
-### Como funciona
+Avaliei as opções e a **melhor escolha é reutilizar o Apify** (já temos `APIFY_API_TOKEN` configurado no projeto, sem custo de nova chave):
 
-1. Usuario cola link da Shopee e clica "Adicionar"
-2. Sistema usa a edge function `extract-shopee` existente para extrair dados (titulo, imagens, preco)
-3. O produto aparece numa tabela editavel onde o usuario pode ajustar titulo, preco, etc
-4. Ao final, clica "Exportar CSV" e recebe o arquivo no formato Shopify
+| Opção | Prós | Contras |
+|---|---|---|
+| **Apify `novi/tiktok-user-api`** ✅ | Sem watermark, suporta `@username`/URL/userID, retorna views/likes/desc, já temos token | Pago por execução (Apify) |
+| `omkarcloud/tiktok-scraper` | 5k req/mês grátis | Precisa de nova chave, menos maduro |
+| TikWM / SnapTik APIs públicas | Grátis | Instáveis, rate-limit agressivo, quebram constantemente |
 
-### Formato CSV Shopify
+**Estratégia escolhida**: usar **Apify `novi/tiktok-user-api`** para perfis (já validado no VideoMiner com `tiktok-hashtag-scraper` da mesma família) e **TikWM como fallback grátis** para download de link único (mais leve/barato que rodar Apify pra 1 vídeo).
 
-Colunas principais do template de importacao:
+### Arquitetura
 
 ```text
-Handle, Title, Body (HTML), Vendor, Product Category, Type, Tags,
-Published, Option1 Name, Option1 Value, Variant SKU, Variant Grams,
-Variant Inventory Tracker, Variant Inventory Qty, Variant Inventory Policy,
-Variant Fulfillment Service, Variant Price, Variant Compare At Price,
-Variant Requires Shipping, Variant Taxable, Image Src, Image Position,
-Status
+Frontend (TikTokTool)
+  ├─ Modo Link  → edge: tiktok-download-single  → TikWM API (grátis) → MP4 sem marca
+  └─ Modo Perfil → edge: tiktok-scrape-profile  → Apify novi/tiktok-user-api → lista de vídeos
+                                                                              ↓
+                                          UI: filtros (views/data) + seleção múltipla
+                                                                              ↓
+                                              Download em lote (fetch direto das URLs)
 ```
-
-- **Preco**: valor extraido x2
-- **Imagens**: cada imagem gera uma linha adicional com mesmo Handle
-- **Status**: "draft" por padrao
-- **Published**: false por padrao
 
 ### Arquivos a criar/modificar
 
-| Tipo | Arquivo | Descricao |
+| Tipo | Arquivo | Descrição |
 |------|---------|-----------|
-| Criar | `src/components/ShopifyScraperTool.tsx` | Componente principal com lista de produtos e botao exportar |
-| Criar | `src/components/steps/ShopifyScraperInput.tsx` | Input de URL + botao adicionar |
-| Criar | `src/lib/shopifyCsvExport.ts` | Funcao para gerar CSV no formato Shopify |
-| Modificar | `src/components/ToolsDashboard.tsx` | Adicionar aba "Shopify" com icone ShoppingBag |
+| Criar | `supabase/functions/tiktok-download-single/index.ts` | Recebe URL, chama TikWM, retorna MP4 sem watermark |
+| Criar | `supabase/functions/tiktok-scrape-profile/index.ts` | Recebe `@user` + limit, chama Apify actor `novi/tiktok-user-api`, retorna lista de vídeos |
+| Modificar | `supabase/config.toml` | Registrar as 2 novas funções |
+| Criar | `src/components/TikTokTool.tsx` | Componente principal (controla os 2 modos) |
+| Criar | `src/components/steps/TikTokInputStep.tsx` | Input com toggle Link/Perfil |
+| Criar | `src/components/steps/TikTokProfileResultStep.tsx` | Grid com vídeos, filtros (mais vistos/recentes), checkboxes, "baixar selecionados" |
+| Criar | `src/components/steps/TikTokSingleResultStep.tsx` | Preview + download de 1 vídeo |
+| Modificar | `src/components/ToolsDashboard.tsx` | Nova aba "TikTok" (grid 7→8 cols), ícone `Music2` |
 
-### Detalhes Tecnicos
+### Detalhes técnicos
 
-- Reutiliza a edge function `extract-shopee` ja existente (extrai titulo, imagens, preco)
-- Precisa extrair **preco** alem de imagens - a funcao atual ja retorna `price` pela Affiliate API
-- Estado dos produtos armazenado em memoria (useState) - nao precisa de banco
-- Exportacao CSV gerada no frontend com download direto
-- Cada produto com multiplas imagens gera N linhas no CSV (mesma Handle, Image Src diferente)
-- Grid de tabs passa de 6 para 7 colunas
-
-### Fluxo do usuario
-
-```text
-1. Abre aba "Shopify"
-2. Cola link do produto Shopee
-3. Clica "Adicionar" → extrai dados automaticamente
-4. Produto aparece na lista com: titulo, preco original, preco x2, thumb
-5. Pode editar titulo/preco na lista
-6. Repete passos 2-5 para mais produtos
-7. Clica "Exportar CSV Shopify"
-8. Baixa arquivo .csv pronto para importar no Shopify
+**Edge `tiktok-download-single`** (TikWM, grátis, sem chave):
+```ts
+POST https://www.tikwm.com/api/
+body: { url: "<tiktok_url>", hd: 1 }
+→ resposta: { data: { play: "<url_mp4_sem_watermark>", cover, title, ... } }
 ```
 
+**Edge `tiktok-scrape-profile`** (Apify):
+```ts
+POST https://api.apify.com/v2/acts/novi~tiktok-user-api/run-sync-get-dataset-items
+   ?token=APIFY_API_TOKEN
+body: { usernames: ["@user"], limit: 50 }
+→ array com download_url (sem watermark), play_count, digg_count, desc, cover, create_time
+```
+
+**Frontend - filtros/ordenação no perfil**:
+- Sort: Mais vistos | Mais recentes | Mais curtidos
+- Filtro por views mínimas (slider)
+- "Selecionar todos" / seleção individual com checkbox
+- Botão "Baixar selecionados" → loop pegando cada `download_url` via `fetch` + `URL.createObjectURL` (ou opcionalmente zipar com `jszip`)
+
+**Tracking de uso**: integrar com `useUsageTracker` (`tool: 'tiktok'`, custType: `apify` para perfil, `free` para link único).
+
+### Fluxo do usuário
+
+```text
+Modo Link:
+1. Cola https://www.tiktok.com/@user/video/123
+2. Clica "Baixar" → preview + botão download MP4
+
+Modo Perfil:
+1. Digita @nomeusuario (ou cola URL do perfil)
+2. Define limite (ex: 30 vídeos) e clica "Buscar"
+3. Vê grid com thumbnails + views/likes/data
+4. Ordena por "Mais vistos", marca os 5 melhores
+5. Clica "Baixar 5 selecionados" → baixa um por um
+```
+
+### Limitações
+
+- Apify cobra por execução (~ centavos por scraping de perfil); link único usa TikWM grátis
+- TikWM é grátis mas tem rate-limit (~1 req/seg); ok para uso individual
+- Download em lote é sequencial via browser (não ZIP server-side, pra evitar custo de bandwidth na edge function)
