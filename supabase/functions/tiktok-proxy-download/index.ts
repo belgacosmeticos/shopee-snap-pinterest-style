@@ -7,10 +7,10 @@ const corsHeaders = {
 async function resolveTikTokMp4(input: string): Promise<string> {
   // Se já é um .mp4 direto, usa
   if (/\.mp4(\?|$)/i.test(input)) return input;
-  // Se é uma URL do TikTok (web), resolve via tikwm
+  // Resolve via tikwm — usa `play` (H.264 + áudio, compatível) em vez de `hdplay` (HEVC sem áudio)
   const form = new URLSearchParams();
   form.append('url', input);
-  form.append('hd', '1');
+  form.append('hd', '0');
   const r = await fetch('https://www.tikwm.com/api/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -20,7 +20,8 @@ async function resolveTikTokMp4(input: string): Promise<string> {
   if (j?.code !== 0 || !j?.data) {
     throw new Error(j?.msg || 'Falha ao resolver MP4 do TikTok');
   }
-  const mp4 = j.data.hdplay || j.data.play;
+  // play = H.264 c/ áudio (sem watermark); fallbacks
+  const mp4 = j.data.play || j.data.wmplay || j.data.hdplay;
   if (!mp4) throw new Error('MP4 não encontrado na resposta');
   return mp4.startsWith('http') ? mp4 : `https://www.tikwm.com${mp4}`;
 }
