@@ -81,3 +81,6 @@ verify_jwt = false
 
 [functions.tiktok-scrape-profile]
 verify_jwt = false
+
+[functions.tiktok-proxy-download]
+verify_jwt = false
