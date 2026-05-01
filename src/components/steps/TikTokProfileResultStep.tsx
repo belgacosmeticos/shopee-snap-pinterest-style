@@ -53,9 +53,10 @@ export const TikTokProfileResultStep = ({ username, videos, onReset }: Props) =>
   };
 
   const downloadOne = async (v: TikTokVideo, idx: number) => {
+    const proxyUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/tiktok-proxy-download?url=${encodeURIComponent(v.downloadUrl)}`;
     try {
-      const res = await fetch(v.downloadUrl);
-      if (!res.ok) throw new Error('fetch falhou');
+      const res = await fetch(proxyUrl);
+      if (!res.ok) throw new Error('proxy falhou');
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -65,9 +66,9 @@ export const TikTokProfileResultStep = ({ username, videos, onReset }: Props) =>
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      // CORS fallback: abrir aba
-      window.open(v.downloadUrl, '_blank');
+    } catch (err) {
+      console.error('[downloadOne] erro', err);
+      toast.error('Falha ao baixar vídeo');
     }
   };
 

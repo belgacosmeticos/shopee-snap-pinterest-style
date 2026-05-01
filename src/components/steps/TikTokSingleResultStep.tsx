@@ -16,8 +16,10 @@ const formatNum = (n: number) => {
 
 export const TikTokSingleResultStep = ({ video, onReset }: Props) => {
   const handleDownload = async () => {
+    const proxyUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/tiktok-proxy-download?url=${encodeURIComponent(video.downloadUrl)}`;
     try {
-      const res = await fetch(video.downloadUrl);
+      const res = await fetch(proxyUrl);
+      if (!res.ok) throw new Error('proxy falhou');
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -27,8 +29,8 @@ export const TikTokSingleResultStep = ({ video, onReset }: Props) => {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      window.open(video.downloadUrl, '_blank');
+    } catch (err) {
+      console.error('[handleDownload] erro', err);
     }
   };
 
