@@ -4,6 +4,27 @@ const corsHeaders = {
   'Access-Control-Expose-Headers': 'content-length, content-type',
 };
 
+async function resolveTikTokMp4(input: string): Promise<string> {
+  // Se já é um .mp4 direto, usa
+  if (/\.mp4(\?|$)/i.test(input)) return input;
+  // Se é uma URL do TikTok (web), resolve via tikwm
+  const form = new URLSearchParams();
+  form.append('url', input);
+  form.append('hd', '1');
+  const r = await fetch('https://www.tikwm.com/api/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form.toString(),
+  });
+  const j = await r.json();
+  if (j?.code !== 0 || !j?.data) {
+    throw new Error(j?.msg || 'Falha ao resolver MP4 do TikTok');
+  }
+  const mp4 = j.data.hdplay || j.data.play;
+  if (!mp4) throw new Error('MP4 não encontrado na resposta');
+  return mp4.startsWith('http') ? mp4 : `https://www.tikwm.com${mp4}`;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -12,16 +33,18 @@ Deno.serve(async (req) => {
   try {
     const url = new URL(req.url);
     const videoUrl = url.searchParams.get('url');
-    if (!videoUrl) {
+    if (!videoUrl || videoUrl === 'undefined' || videoUrl === 'null') {
       return new Response(JSON.stringify({ error: 'url é obrigatória' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    console.log('[tiktok-proxy-download] streaming', videoUrl);
+    console.log('[tiktok-proxy-download] resolving', videoUrl);
+    const mp4Url = await resolveTikTokMp4(videoUrl);
+    console.log('[tiktok-proxy-download] streaming', mp4Url);
 
-    const upstream = await fetch(videoUrl, {
+    const upstream = await fetch(mp4Url, {
       headers: {
         'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',

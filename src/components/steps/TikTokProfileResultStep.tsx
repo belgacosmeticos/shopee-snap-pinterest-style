@@ -53,7 +53,12 @@ export const TikTokProfileResultStep = ({ username, videos, onReset }: Props) =>
   };
 
   const downloadOne = async (v: TikTokVideo, idx: number) => {
-    const proxyUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/tiktok-proxy-download?url=${encodeURIComponent(v.downloadUrl)}`;
+    const sourceUrl = v.downloadUrl || v.url;
+    if (!sourceUrl) {
+      toast.error('Vídeo sem URL disponível');
+      return;
+    }
+    const proxyUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/tiktok-proxy-download?url=${encodeURIComponent(sourceUrl)}`;
     try {
       const res = await fetch(proxyUrl);
       if (!res.ok) throw new Error('proxy falhou');
